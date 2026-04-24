@@ -9,10 +9,16 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SELCO_VENDOR_SERVICE_ROLE_KEY") ?? "";
 const selcoBackendUrl = "https://selcobackend-prod.onrender.com";
+let supabaseClient: ReturnType<typeof createClient> | null = null;
 
-const supabase = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { persistSession: false },
-});
+function getSupabaseAdmin() {
+  if (!supabaseUrl || !serviceRoleKey) throw new Error("Function secrets are not configured.");
+  if (supabaseClient) return supabaseClient;
+  supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+  return supabaseClient;
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -65,6 +71,7 @@ function generateToken() {
 }
 
 async function validateSession(token: string) {
+  const supabase = getSupabaseAdmin();
   const tokenHash = await hashToken(token);
   const { data, error } = await supabase.from("grameee_admin_sessions").select("id, username, expires_at").eq("token_hash", tokenHash).maybeSingle();
   if (error || !data) return null;
@@ -77,12 +84,14 @@ async function validateSession(token: string) {
 }
 
 async function verifyAdminPassword(username: string, password: string) {
+  const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.rpc("grameee_admin_password_matches", { p_username: username, p_password: password });
   if (error) throw new Error(`Admin password verification failed: ${error.message}`);
   return Boolean(data);
 }
 
 async function handleLogin(password: string) {
+  const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.from("grameee_admin_accounts").select("username, password_hash").eq("username", "admin").maybeSingle();
   if (error) return errorResponse(`Admin account lookup failed: ${error.message}`, 500);
   if (!data?.password_hash) return errorResponse("Admin account does not exist yet.", 401);
@@ -104,6 +113,7 @@ async function handleVerify(token: string) {
 }
 
 async function handleLogout(token: string) {
+  const supabase = getSupabaseAdmin();
   const tokenHash = await hashToken(token);
   await supabase.from("grameee_admin_sessions").delete().eq("token_hash", tokenHash);
   return jsonResponse({ ok: true });
@@ -180,6 +190,7 @@ async function mapInBatches<T, R>(items: T[], batchSize: number, worker: (item: 
 }
 
 async function handleListSelcoSyncRuns(token: string) {
+  const supabase = getSupabaseAdmin();
   const session = await validateSession(token);
   if (!session) return errorResponse("Invalid admin session.", 401);
   const { data, error } = await supabase.from("selco_vendor_sync_runs").select("*").order("created_at", { ascending: false }).limit(10);
@@ -188,6 +199,7 @@ async function handleListSelcoSyncRuns(token: string) {
 }
 
 async function handleSyncSelcoVendors(token: string) {
+  const supabase = getSupabaseAdmin();
   const session = await validateSession(token);
   if (!session) return errorResponse("Invalid admin session.", 401);
 
