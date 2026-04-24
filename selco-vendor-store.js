@@ -1,4 +1,4 @@
-const SelcoVendorStore = (() => {
+window.SelcoVendorStore = (() => {
   const VENDORS_TABLE = () => (window.APP_CONFIG && window.APP_CONFIG.SELCO_VENDORS_TABLE) || 'selco_vendors';
   const PRODUCTS_TABLE = () => (window.APP_CONFIG && window.APP_CONFIG.SELCO_PRODUCTS_TABLE) || 'selco_products';
   const ADMIN_API_URL = () => `${String(window.APP_CONFIG?.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/selco-vendor-admin`;
