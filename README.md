@@ -15,6 +15,8 @@ Included app surfaces:
 
 Deployment:
 - GitHub Pages deploys automatically from `.github/workflows/deploy-pages.yml`
+- GitHub repository: `https://github.com/tanmaymukherji/SSP`
+- Live site: `https://tanmaymukherji.github.io/SSP/`
 - The static frontend uses the configured Supabase URL and anon key in `config.js`
 - Add a `MAPMYINDIA_MAP_KEY` in `config.js` to enable the live map
 

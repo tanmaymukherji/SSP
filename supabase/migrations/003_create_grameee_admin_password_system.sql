@@ -1,0 +1,1 @@
+-- Baseline placeholder to match the linked Supabase project's existing migration history.
