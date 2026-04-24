@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>Vendor Details</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="vendor-shell vendor-shell-narrow">
+    <header class="vendor-hero">
+      <div>
+        <p class="vendor-kicker">Selco Solution Portal Directory</p>
+        <h1 id="detail-title">Vendor Details</h1>
+        <p class="vendor-subtitle" id="detail-subtitle">Loading supplier details...</p>
+      </div>
+      <div class="vendor-hero-actions">
+        <a class="btn btn-small" href="./index.html">Back to Search</a>
+      </div>
+    </header>
+    <main id="vendor-detail-root" class="vendor-detail-root">
+      <section class="section"><p>Loading supplier details...</p></section>
+    </main>
+  </div>
+  <script src="./vendor-detail.js"></script>
+</body>
+</html>

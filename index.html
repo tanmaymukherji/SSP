@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>Selco Vendor Directory</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="vendor-shell">
+    <header class="vendor-hero">
+      <div>
+        <p class="vendor-kicker">Selco Solution Portal Directory</p>
+        <h1>Supplier and Product Search</h1>
+        <p class="vendor-subtitle">Search synced suppliers, products, tags, keywords, and service locations from the Selco Solutions Portal.</p>
+      </div>
+      <div class="vendor-hero-actions">
+        <a class="btn btn-warning btn-small" href="./admin.html">Admin Sync</a>
+      </div>
+    </header>
+
+    <main class="vendor-layout">
+      <aside class="vendor-sidebar">
+        <section class="section">
+          <h3>Search Filters</h3>
+          <div class="form-group"><label for="search-supplier">Supplier</label><input id="search-supplier" type="search" placeholder="Search vendor name" /></div>
+          <div class="form-group"><label for="search-product">Product</label><input id="search-product" type="search" placeholder="Search product name" /></div>
+          <div class="form-group"><label for="search-tags">Tags</label><input id="search-tags" type="search" placeholder="Search tags" /></div>
+          <div class="form-group"><label for="search-location">Location</label><input id="search-location" type="search" placeholder="City, state, service region" /></div>
+          <div class="form-group"><label for="search-keyword">Keyword</label><input id="search-keyword" type="search" placeholder="Any keyword" /></div>
+          <div class="btn-group">
+            <button class="btn" id="run-search" type="button">Search</button>
+            <button class="btn btn-danger btn-small" id="clear-search" type="button">Clear</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <h3>Directory Summary</h3>
+          <div class="stats-grid">
+            <div class="stat-card"><div class="stat-number" id="vendor-total-count">0</div><div>Vendors</div></div>
+            <div class="stat-card"><div class="stat-number" id="product-total-count">0</div><div>Products</div></div>
+            <div class="stat-card"><div class="stat-number" id="filtered-vendor-count">0</div><div>Matches</div></div>
+          </div>
+          <p class="section-note" id="directory-status">Loading vendor directory...</p>
+        </section>
+      </aside>
+
+      <section class="vendor-results-shell">
+        <div class="section">
+          <div class="vendor-results-header">
+            <div>
+              <h3>Map Results</h3>
+              <p class="section-note">Click a flag or a result card to focus that supplier. The map uses MapMyIndia when a key is configured.</p>
+            </div>
+          </div>
+          <div class="vendor-map-grid">
+            <div id="results-map" class="vendor-map-canvas"></div>
+            <div id="map-results-list" class="vendor-map-list"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="vendor-results-header">
+            <div>
+              <h3>Supplier Results</h3>
+              <p class="section-note" id="results-summary">No results loaded yet.</p>
+            </div>
+          </div>
+          <div id="vendor-results" class="vendor-results-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./vendor-directory.js"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Selco Vendor Admin</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="vendor-hero">
+      <div>
+        <p class="vendor-kicker">Standalone Selco Vendor Directory</p>
+        <h1>Admin Sync</h1>
+        <p class="vendor-subtitle">Run a manual sync that compiles all vendors, contact details, and product offerings into Supabase.</p>
+      </div>
+      <div class="vendor-hero-actions">
+        <a class="btn btn-small" href="./index.html">Open Search</a>
+      </div>
+    </header>
+
+    <main class="admin-grid">
+      <section class="section">
+        <h3>Admin Login</h3>
+        <form class="admin-form" id="loginForm">
+          <div class="form-group"><label for="adminPassword">Admin Password</label><input id="adminPassword" name="adminPassword" type="password" placeholder="Enter admin password" required /></div>
+          <div class="btn-group"><button class="btn btn-success" type="submit">Sign In</button></div>
+          <p class="admin-status" id="loginStatus"></p>
+        </form>
+
+        <div id="sessionPanel" class="session-panel">
+          <h3>Admin Controls</h3>
+          <div class="btn-group">
+            <button class="btn btn-success" type="button" id="runSelcoSync">Run Vendor Sync</button>
+            <button class="btn btn-danger btn-small" type="button" id="signOutButton">Sign Out</button>
+          </div>
+          <p class="admin-status" id="sessionStatus"></p>
+        </div>
+      </section>
+
+      <section class="section queue-panel" id="selcoSyncPanel">
+        <h3>Sync History</h3>
+        <p class="admin-helper" id="selcoSyncMeta">Sign in as admin to view and run sync operations.</p>
+        <div class="admin-card-list" id="selcoSyncRuns"></div>
+      </section>
+    </main>
+  </div>
+  <script src="./admin.js"></script>
+</body>
+</html>
