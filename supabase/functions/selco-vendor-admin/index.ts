@@ -210,7 +210,6 @@ async function handleSyncSelcoVendors(token: string) {
   try {
     const [vendors, products] = await Promise.all([fetchAllSelcoVendors(), fetchAllSelcoProducts()]);
     const productsByVendor = new Map<string, Record<string, unknown>[]>();
-    const scrapedByVendorId = new Map<string, Awaited<ReturnType<typeof scrapeContactDetails>>>();
     for (const product of products as Record<string, unknown>[]) {
       const vendorValue = product.vendorId;
       const vendorId = typeof vendorValue === "object" && vendorValue ? requireString((vendorValue as Record<string, unknown>)._id) : requireString(vendorValue);
@@ -219,25 +218,17 @@ async function handleSyncSelcoVendors(token: string) {
       productsByVendor.get(vendorId)?.push(product);
     }
 
-    await mapInBatches(vendors as Record<string, unknown>[], 8, async (vendor) => {
-      const portalVendorId = requireString(vendor._id);
-      const websiteDetails = safeUrl(requireString(vendor.website_url) || requireString(vendor.website));
-      const scraped = await scrapeContactDetails(websiteDetails);
-      scrapedByVendorId.set(portalVendorId, scraped);
-      return scraped;
-    });
-
     const vendorRows = [];
     for (const vendor of vendors as Record<string, unknown>[]) {
       const portalVendorId = requireString(vendor._id);
       const relatedProducts = productsByVendor.get(portalVendorId) || [];
       const websiteDetails = safeUrl(requireString(vendor.website_url) || requireString(vendor.website));
-      const scraped = scrapedByVendorId.get(portalVendorId) || await scrapeContactDetails(websiteDetails);
       const serviceLocations = dedupe(((vendor.service_locations as unknown[]) || []).map((item) => normalizeLocalizedText(item)));
       const locationText = dedupe([normalizeLocalizedText(vendor.city), normalizeLocalizedText(vendor.state), normalizeLocalizedText(vendor.country)]).join(", ");
       const tags = buildVendorTags(vendor, relatedProducts);
-      const finalEmail = scraped.websiteEmail || requireString(vendor.email_address) || requireString(vendor.email_of_poc);
-      const finalPhone = scraped.websitePhone || requireString(vendor.phone);
+      const portalEmail = requireString(vendor.email_address) || requireString(vendor.email_of_poc);
+      const portalPhone = requireString(vendor.phone);
+      const hasWebsite = Boolean(websiteDetails);
       vendorRows.push({
         portal_vendor_id: portalVendorId,
         vendor_name: normalizeLocalizedText(vendor.name),
@@ -251,16 +242,16 @@ async function handleSyncSelcoVendors(token: string) {
         tags,
         portal_vendor_link: portalVendorId ? `https://solutionsportal.org/en/vendors/${portalVendorId}` : null,
         portal_contact_name: normalizeLocalizedText(vendor.point_of_contact) || null,
-        portal_email: requireString(vendor.email_address) || requireString(vendor.email_of_poc) || null,
-        portal_phone: requireString(vendor.phone) || null,
-        website_email: scraped.websiteEmail || null,
-        website_phone: scraped.websitePhone || null,
-        website_address: scraped.websiteAddress || null,
-        final_contact_email: finalEmail || null,
-        final_contact_phone: finalPhone || null,
-        final_contact_address: scraped.websiteAddress || null,
-        contact_source_url: scraped.contactSourceUrl || null,
-        website_status: scraped.websiteStatus || null,
+        portal_email: portalEmail || null,
+        portal_phone: portalPhone || null,
+        website_email: null,
+        website_phone: null,
+        website_address: null,
+        final_contact_email: portalEmail || null,
+        final_contact_phone: portalPhone || null,
+        final_contact_address: null,
+        contact_source_url: websiteDetails || null,
+        website_status: hasWebsite ? "Website enrichment pending" : "No website",
         products_count: relatedProducts.length,
         search_text: dedupe([normalizeLocalizedText(vendor.name), normalizeLocalizedText(vendor.description), locationText, ...serviceLocations, ...tags, ...relatedProducts.flatMap((product) => [normalizeLocalizedText(product.name), normalizeLocalizedText(product.product_description)])]).join(" "),
         raw_vendor: vendor,
