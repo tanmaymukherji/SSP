@@ -9,7 +9,27 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceRoleKey = Deno.env.get("SELCO_VENDOR_SERVICE_ROLE_KEY") ?? "";
 const selcoBackendUrl = "https://selcobackend-prod.onrender.com";
+const contactSeedUrl = "https://tanmaymukherji.github.io/SSP/vendor-contact-seed.json";
 let supabaseClient: ReturnType<typeof createClient> | null = null;
+let contactSeedPromise: Promise<{ byId: Map<string, ContactSeedRecord>; byName: Map<string, ContactSeedRecord> }> | null = null;
+
+type ContactSeedRecord = {
+  vendor_id: string;
+  vendor_name?: string;
+  website_details?: string;
+  products_links?: string;
+  scraped_email?: string;
+  scraped_phone?: string;
+  scraped_address?: string;
+  final_contact_email?: string;
+  final_contact_phone?: string;
+  final_contact_address?: string;
+  contact_source_url?: string;
+  website_status?: string;
+  contact_notes?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+};
 
 function getSupabaseAdmin() {
   if (!supabaseUrl || !serviceRoleKey) throw new Error("Function secrets are not configured.");
@@ -57,6 +77,42 @@ function safeUrl(value: string) {
 
 function dedupe(values: string[]) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function toNullableNumber(value: unknown) {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function cleanImportedAddress(value: string) {
+  const address = requireString(value).replace(/\s+/g, " ").trim();
+  if (!address) return "";
+  if (/(function\(|\.mf-|@context|selector|<script|<style|\{|\})/i.test(address)) return "";
+  return address.length > 220 ? address.slice(0, 220).trim() : address;
+}
+
+async function getContactSeedMap() {
+  if (!contactSeedPromise) {
+    contactSeedPromise = (async () => {
+      try {
+        const response = await fetch(contactSeedUrl, { headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error(`Seed fetch failed: ${response.status}`);
+        const records = await response.json() as ContactSeedRecord[];
+        const byId = new Map<string, ContactSeedRecord>();
+        const byName = new Map<string, ContactSeedRecord>();
+        for (const record of records) {
+          const id = requireString(record.vendor_id);
+          const name = normalizeLocalizedText(record.vendor_name);
+          if (id) byId.set(id, record);
+          if (name && !byName.has(name)) byName.set(name, record);
+        }
+        return { byId, byName };
+      } catch {
+        return { byId: new Map<string, ContactSeedRecord>(), byName: new Map<string, ContactSeedRecord>() };
+      }
+    })();
+  }
+  return await contactSeedPromise;
 }
 
 async function hashToken(token: string) {
@@ -170,6 +226,35 @@ async function scrapeContactDetails(websiteUrl: string) {
   }
 }
 
+function mergeContactDetails(
+  seed: ContactSeedRecord | undefined,
+  scraped: Awaited<ReturnType<typeof scrapeContactDetails>> | null,
+  websiteDetails: string,
+  portalEmail: string,
+  portalPhone: string,
+) {
+  const websiteEmail = requireString(seed?.scraped_email) || requireString(scraped?.websiteEmail);
+  const websitePhone = requireString(seed?.scraped_phone) || requireString(scraped?.websitePhone);
+  const websiteAddress = cleanImportedAddress(requireString(seed?.final_contact_address) || requireString(seed?.scraped_address) || requireString(scraped?.websiteAddress));
+  const finalEmail = requireString(seed?.final_contact_email) || websiteEmail || portalEmail;
+  const finalPhone = requireString(seed?.final_contact_phone) || websitePhone || portalPhone;
+  return {
+    websiteDetails: requireString(seed?.website_details) || websiteDetails,
+    websiteEmail: websiteEmail || null,
+    websitePhone: websitePhone || null,
+    websiteAddress: websiteAddress || null,
+    finalEmail: finalEmail || null,
+    finalPhone: finalPhone || null,
+    finalAddress: websiteAddress || null,
+    contactSourceUrl: requireString(seed?.contact_source_url) || requireString(scraped?.contactSourceUrl) || websiteDetails || null,
+    websiteStatus: requireString(seed?.website_status) || requireString(scraped?.websiteStatus) || (websiteDetails ? "Website listed" : "No website"),
+    contactNotes: requireString(seed?.contact_notes) || (websiteEmail || websitePhone || websiteAddress ? "Website contact used" : "Used portal contact where available"),
+    legacyProductsLinks: requireString(seed?.products_links) || null,
+    latitude: toNullableNumber(seed?.latitude),
+    longitude: toNullableNumber(seed?.longitude),
+  };
+}
+
 function buildVendorTags(vendor: Record<string, unknown>, products: Record<string, unknown>[]) {
   return dedupe([
     normalizeLocalizedText(vendor.vendor_type),
@@ -187,6 +272,16 @@ async function mapInBatches<T, R>(items: T[], batchSize: number, worker: (item: 
     results.push(...batchResults);
   }
   return results;
+}
+
+async function upsertInBatches(table: string, rows: Record<string, unknown>[], onConflict: string, batchSize: number) {
+  const supabase = getSupabaseAdmin();
+  for (let index = 0; index < rows.length; index += batchSize) {
+    const batch = rows.slice(index, index + batchSize);
+    if (!batch.length) continue;
+    const { error } = await supabase.from(table).upsert(batch, { onConflict });
+    if (error) throw new Error(`${table} upsert failed: ${error.message}`);
+  }
 }
 
 async function handleListSelcoSyncRuns(token: string) {
@@ -209,6 +304,7 @@ async function handleSyncSelcoVendors(token: string) {
 
   try {
     const [vendors, products] = await Promise.all([fetchAllSelcoVendors(), fetchAllSelcoProducts()]);
+    const contactSeedMap = await getContactSeedMap();
     const productsByVendor = new Map<string, Record<string, unknown>[]>();
     for (const product of products as Record<string, unknown>[]) {
       const vendorValue = product.vendorId;
@@ -221,19 +317,22 @@ async function handleSyncSelcoVendors(token: string) {
     const vendorRows = [];
     for (const vendor of vendors as Record<string, unknown>[]) {
       const portalVendorId = requireString(vendor._id);
+      const normalizedVendorName = normalizeLocalizedText(vendor.name);
       const relatedProducts = productsByVendor.get(portalVendorId) || [];
       const websiteDetails = safeUrl(requireString(vendor.website_url) || requireString(vendor.website));
+      const seed = contactSeedMap.byId.get(portalVendorId) || contactSeedMap.byName.get(normalizedVendorName);
       const serviceLocations = dedupe(((vendor.service_locations as unknown[]) || []).map((item) => normalizeLocalizedText(item)));
       const locationText = dedupe([normalizeLocalizedText(vendor.city), normalizeLocalizedText(vendor.state), normalizeLocalizedText(vendor.country)]).join(", ");
       const tags = buildVendorTags(vendor, relatedProducts);
       const portalEmail = requireString(vendor.email_address) || requireString(vendor.email_of_poc);
       const portalPhone = requireString(vendor.phone);
-      const hasWebsite = Boolean(websiteDetails);
+      const scraped = null;
+      const contact = mergeContactDetails(seed, scraped, websiteDetails, portalEmail, portalPhone);
       vendorRows.push({
         portal_vendor_id: portalVendorId,
-        vendor_name: normalizeLocalizedText(vendor.name),
+        vendor_name: normalizedVendorName,
         about_vendor: normalizeLocalizedText(vendor.description),
-        website_details: websiteDetails || null,
+        website_details: contact.websiteDetails || null,
         location_text: locationText || null,
         city: normalizeLocalizedText(vendor.city) || null,
         state: normalizeLocalizedText(vendor.state) || null,
@@ -244,14 +343,18 @@ async function handleSyncSelcoVendors(token: string) {
         portal_contact_name: normalizeLocalizedText(vendor.point_of_contact) || null,
         portal_email: portalEmail || null,
         portal_phone: portalPhone || null,
-        website_email: null,
-        website_phone: null,
-        website_address: null,
-        final_contact_email: portalEmail || null,
-        final_contact_phone: portalPhone || null,
-        final_contact_address: null,
-        contact_source_url: websiteDetails || null,
-        website_status: hasWebsite ? "Website enrichment pending" : "No website",
+        website_email: contact.websiteEmail,
+        website_phone: contact.websitePhone,
+        website_address: contact.websiteAddress,
+        final_contact_email: contact.finalEmail,
+        final_contact_phone: contact.finalPhone,
+        final_contact_address: contact.finalAddress,
+        contact_source_url: contact.contactSourceUrl,
+        website_status: contact.websiteStatus,
+        legacy_products_links: contact.legacyProductsLinks,
+        contact_notes: contact.contactNotes,
+        latitude: contact.latitude,
+        longitude: contact.longitude,
         products_count: relatedProducts.length,
         search_text: dedupe([normalizeLocalizedText(vendor.name), normalizeLocalizedText(vendor.description), locationText, ...serviceLocations, ...tags, ...relatedProducts.flatMap((product) => [normalizeLocalizedText(product.name), normalizeLocalizedText(product.product_description)])]).join(" "),
         raw_vendor: vendor,
@@ -281,10 +384,8 @@ async function handleSyncSelcoVendors(token: string) {
       };
     }).filter((row) => row.portal_product_id && row.portal_vendor_id);
 
-    const { error: vendorError } = await supabase.from("selco_vendors").upsert(vendorRows, { onConflict: "portal_vendor_id" });
-    if (vendorError) throw new Error(`Vendor upsert failed: ${vendorError.message}`);
-    const { error: productError } = await supabase.from("selco_products").upsert(productRows, { onConflict: "portal_product_id" });
-    if (productError) throw new Error(`Product upsert failed: ${productError.message}`);
+    await upsertInBatches("selco_vendors", vendorRows, "portal_vendor_id", 100);
+    await upsertInBatches("selco_products", productRows, "portal_product_id", 150);
 
     await supabase.from("selco_vendor_sync_runs").update({ status: "success", finished_at: new Date().toISOString(), vendor_count: vendorRows.length, product_count: productRows.length, updated_at: new Date().toISOString() }).eq("id", runId);
     return jsonResponse({ ok: true, vendorCount: vendorRows.length, productCount: productRows.length });

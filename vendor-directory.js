@@ -1,4 +1,16 @@
-const directoryState = { vendors: [], products: [], filteredVendors: [], geocodeCache: new Map(), map: null, mapReady: false, markers: [] };
+const directoryState = {
+  vendors: [],
+  products: [],
+  filteredVendors: [],
+  currentPage: 1,
+  pageSize: 12,
+  hasSearched: false,
+  geocodeCache: new Map(),
+  map: null,
+  mapReady: false,
+  markers: [],
+  selectedVendorId: null,
+};
 
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
@@ -12,39 +24,116 @@ const resultsEl = document.getElementById('vendor-results');
 const mapListEl = document.getElementById('map-results-list');
 const statusEl = document.getElementById('directory-status');
 const resultsSummaryEl = document.getElementById('results-summary');
+const paginationEls = [
+  document.getElementById('results-pagination-top'),
+  document.getElementById('results-pagination-bottom'),
+];
 
 function esc(value) {
   return String(value || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 }
 
-function normalizeText(value) { return String(value || '').trim().toLowerCase(); }
-
-function buildVendorSearchText(vendor) {
-  return [
-    vendor.vendor_name, vendor.about_vendor, vendor.location_text, vendor.city, vendor.state, vendor.country,
-    ...(vendor.service_locations || []), ...(vendor.tags || []),
-    ...(vendor.products || []).flatMap((product) => [product.product_name, product.product_description, ...(product.tags || [])]),
-  ].filter(Boolean).join(' ').toLowerCase();
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
-function matchesVendor(vendor, filters) {
-  const searchText = buildVendorSearchText(vendor);
-  const supplierMatch = !filters.supplier || normalizeText(vendor.vendor_name).includes(filters.supplier);
-  const productMatch = !filters.product || (vendor.products || []).some((product) => normalizeText(product.product_name).includes(filters.product));
-  const tagsMatch = !filters.tags || [...(vendor.tags || []), ...(vendor.products || []).flatMap((product) => product.tags || [])].some((tag) => normalizeText(tag).includes(filters.tags));
-  const locationMatch = !filters.location || [vendor.location_text, vendor.city, vendor.state, vendor.country, ...(vendor.service_locations || [])].filter(Boolean).join(' ').toLowerCase().includes(filters.location);
-  const keywordMatch = !filters.keyword || searchText.includes(filters.keyword);
-  return supplierMatch && productMatch && tagsMatch && locationMatch && keywordMatch;
+function tokenize(value) {
+  return normalizeText(value).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function buildVendorIndex(vendor) {
+  const productNames = (vendor.products || []).map((product) => normalizeText(product.product_name)).join(' ');
+  const productDescriptions = (vendor.products || []).map((product) => normalizeText(product.product_description)).join(' ');
+  const tags = [...(vendor.tags || []), ...(vendor.products || []).flatMap((product) => product.tags || [])].map(normalizeText).join(' ');
+  const locations = [vendor.location_text, vendor.city, vendor.state, vendor.country, vendor.final_contact_address, ...(vendor.service_locations || [])].map(normalizeText).join(' ');
+  const contacts = [vendor.portal_contact_name, vendor.portal_email, vendor.portal_phone, vendor.website_email, vendor.website_phone, vendor.final_contact_email, vendor.final_contact_phone].map(normalizeText).join(' ');
+  const website = [vendor.website_details, vendor.website_status, vendor.contact_notes, vendor.legacy_products_links].map(normalizeText).join(' ');
+  const keyword = [vendor.vendor_name, vendor.about_vendor, productNames, productDescriptions, tags, locations, contacts, website, vendor.search_text].map(normalizeText).join(' ');
+  return {
+    supplier: normalizeText(vendor.vendor_name),
+    products: productNames,
+    tags,
+    location: locations,
+    keyword,
+  };
+}
+
+function tokensMatchAll(haystack, tokens) {
+  return tokens.every((token) => haystack.includes(token));
+}
+
+function scoreAgainstTokens(haystack, tokens, weight) {
+  if (!tokens.length) return 0;
+  let score = 0;
+  for (const token of tokens) {
+    if (!haystack.includes(token)) return null;
+    score += haystack === token ? weight * 3 : haystack.startsWith(token) ? weight * 2 : weight;
+  }
+  return score;
+}
+
+function scoreVendor(vendor, filters) {
+  const index = vendor._searchIndex || (vendor._searchIndex = buildVendorIndex(vendor));
+  let score = 0;
+
+  const supplierScore = scoreAgainstTokens(index.supplier, filters.supplierTokens, 22);
+  if (supplierScore === null) return null;
+  score += supplierScore;
+
+  const productScore = scoreAgainstTokens(index.products, filters.productTokens, 18);
+  if (productScore === null) return null;
+  score += productScore;
+
+  const tagScore = scoreAgainstTokens(index.tags, filters.tagTokens, 10);
+  if (tagScore === null) return null;
+  score += tagScore;
+
+  const locationScore = scoreAgainstTokens(index.location, filters.locationTokens, 12);
+  if (locationScore === null) return null;
+  score += locationScore;
+
+  if (filters.keywordTokens.length) {
+    if (!tokensMatchAll(index.keyword, filters.keywordTokens)) return null;
+    score += filters.keywordTokens.reduce((total, token) => total + (index.supplier.includes(token) ? 20 : 8), 0);
+  }
+
+  if (filters.keywordPhrase && index.keyword.includes(filters.keywordPhrase)) score += 35;
+  if (filters.supplierPhrase && index.supplier.includes(filters.supplierPhrase)) score += 25;
+  if ((vendor.products_count || vendor.products?.length || 0) > 0) score += 3;
+  if (vendor.final_contact_address) score += 2;
+  if (vendor.latitude && vendor.longitude) score += 4;
+
+  return score;
 }
 
 function getFilters() {
+  const supplier = normalizeText(searchEls.supplier.value);
+  const product = normalizeText(searchEls.product.value);
+  const tags = normalizeText(searchEls.tags.value);
+  const location = normalizeText(searchEls.location.value);
+  const keyword = normalizeText(searchEls.keyword.value);
   return {
-    supplier: normalizeText(searchEls.supplier.value),
-    product: normalizeText(searchEls.product.value),
-    tags: normalizeText(searchEls.tags.value),
-    location: normalizeText(searchEls.location.value),
-    keyword: normalizeText(searchEls.keyword.value),
+    supplierPhrase: supplier,
+    productPhrase: product,
+    tagPhrase: tags,
+    locationPhrase: location,
+    keywordPhrase: keyword,
+    supplierTokens: tokenize(supplier),
+    productTokens: tokenize(product),
+    tagTokens: tokenize(tags),
+    locationTokens: tokenize(location),
+    keywordTokens: tokenize(keyword),
   };
+}
+
+function hasAnyFilter(filters) {
+  return Boolean(
+    filters.supplierTokens.length ||
+    filters.productTokens.length ||
+    filters.tagTokens.length ||
+    filters.locationTokens.length ||
+    filters.keywordTokens.length
+  );
 }
 
 function setCounts() {
@@ -53,11 +142,40 @@ function setCounts() {
   document.getElementById('filtered-vendor-count').textContent = String(directoryState.filteredVendors.length);
 }
 
+function getPageCount() {
+  return Math.max(1, Math.ceil(directoryState.filteredVendors.length / directoryState.pageSize));
+}
+
+function getPageResults() {
+  const start = (directoryState.currentPage - 1) * directoryState.pageSize;
+  return directoryState.filteredVendors.slice(start, start + directoryState.pageSize);
+}
+
+function setSelectedVendor(vendorId) {
+  directoryState.selectedVendorId = vendorId || null;
+  document.querySelectorAll('[data-vendor-card]').forEach((card) => {
+    card.classList.toggle('active', card.dataset.vendorCard === vendorId);
+  });
+  document.querySelectorAll('[data-focus-vendor]').forEach((item) => {
+    item.classList.toggle('active', item.dataset.focusVendor === vendorId);
+  });
+}
+
 function focusVendor(vendorId) {
   if (!vendorId) return;
+  setSelectedVendor(vendorId);
   const escapedId = window.CSS?.escape ? window.CSS.escape(vendorId) : vendorId.replace(/"/g, '\\"');
   const card = document.querySelector(`[data-vendor-card="${escapedId}"]`);
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function ensureMapCss() {
+  if (document.getElementById('mappls-web-sdk-css')) return;
+  const link = document.createElement('link');
+  link.id = 'mappls-web-sdk-css';
+  link.rel = 'stylesheet';
+  link.href = 'https://apis.mappls.com/vector_map/assets/v3.5/mappls-glob.css';
+  document.head.appendChild(link);
 }
 
 async function loadMapSdk() {
@@ -66,23 +184,44 @@ async function loadMapSdk() {
     document.getElementById('results-map').innerHTML = '<div class="vendor-map-placeholder">Add `MAPMYINDIA_MAP_KEY` in `config.js` to enable the map.</div>';
     return false;
   }
-  if (window.mappls) return true;
-  await new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = `https://apis.mappls.com/advancedmaps/api/${encodeURIComponent(key)}/map_sdk?layer=vector&v=3.0`;
-    script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return Boolean(window.mappls);
+  if (window.mappls?.Map) return true;
+  ensureMapCss();
+  const urls = [
+    `https://sdk.mappls.com/map/sdk/web?v=3.0&access_token=${encodeURIComponent(key)}`,
+    `https://sdk.mappls.com/map/sdk/web?v=3.0&layer=vector&access_token=${encodeURIComponent(key)}`,
+    `https://apis.mappls.com/advancedmaps/api/${encodeURIComponent(key)}/map_sdk?layer=vector&v=3.0`,
+  ];
+  for (const src of urls) {
+    try {
+      await new Promise((resolve, reject) => {
+        document.querySelectorAll('script[data-mappls-sdk="true"]').forEach((node) => node.remove());
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.defer = true;
+        script.dataset.mapplsSdk = 'true';
+        script.onload = () => window.mappls?.Map ? resolve() : reject(new Error('Mappls SDK unavailable'));
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      return true;
+    } catch {}
+  }
+  document.getElementById('results-map').innerHTML = '<div class="vendor-map-placeholder">The MapMyIndia SDK could not be loaded for this page.</div>';
+  return false;
 }
 
 async function ensureMap() {
   if (directoryState.mapReady) return true;
-  const loaded = await loadMapSdk().catch(() => false);
-  if (!loaded || !window.mappls) return false;
-  directoryState.map = new window.mappls.Map('results-map', { center: [22.5937, 78.9629], zoom: 4 });
+  const loaded = await loadMapSdk();
+  if (!loaded || !window.mappls?.Map) return false;
+  directoryState.map = new window.mappls.Map('results-map', {
+    center: { lat: 22.9734, lng: 78.6569 },
+    zoom: 4.8,
+    zoomControl: true,
+    geolocation: false,
+    location: false,
+  });
   directoryState.mapReady = true;
   return true;
 }
@@ -90,21 +229,30 @@ async function ensureMap() {
 async function geocodeVendor(vendor) {
   const cacheKey = vendor.portal_vendor_id;
   if (directoryState.geocodeCache.has(cacheKey)) return directoryState.geocodeCache.get(cacheKey);
+  if (vendor.latitude && vendor.longitude) {
+    const point = { lat: Number(vendor.latitude), lng: Number(vendor.longitude) };
+    directoryState.geocodeCache.set(cacheKey, point);
+    return point;
+  }
   const query = [vendor.final_contact_address, vendor.location_text, vendor.city, vendor.state, vendor.country].filter(Boolean).join(', ');
   if (!query) return null;
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`, { headers: { Accept: 'application/json' } });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`, {
+      headers: { Accept: 'application/json' },
+    });
     const data = await response.json();
     const match = Array.isArray(data) ? data[0] : null;
     if (!match) return null;
     const point = { lat: Number(match.lat), lng: Number(match.lon) };
     directoryState.geocodeCache.set(cacheKey, point);
     return point;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function clearMapMarkers() {
-  directoryState.markers.forEach((marker) => { if (marker && typeof marker.remove === 'function') marker.remove(); });
+  directoryState.markers.forEach((marker) => marker?.remove?.());
   directoryState.markers = [];
 }
 
@@ -112,58 +260,122 @@ async function renderMapMarkers(vendors) {
   const ready = await ensureMap();
   if (!ready) return;
   clearMapMarkers();
-  const points = [];
-  for (const vendor of vendors.slice(0, 25)) {
-    const point = await geocodeVendor(vendor);
-    if (!point) continue;
-    points.push({ vendor, point });
+  const geocoded = await Promise.all(vendors.map(async (vendor) => ({ vendor, point: await geocodeVendor(vendor) })));
+  const points = geocoded.filter((item) => item.point);
+  if (!points.length) {
+    if (!vendors.length) {
+      mapListEl.innerHTML = '<div class="vendor-map-status">No mappable coordinates were available for the current page of results yet.</div>';
+    } else {
+      mapListEl.insertAdjacentHTML('afterbegin', '<div class="vendor-map-status">Matching suppliers are listed here, but no coordinates were available for this page yet.</div>');
+    }
+    directoryState.map?.setCenter?.({ lat: 22.9734, lng: 78.6569 });
+    directoryState.map?.setZoom?.(4.8);
+    return;
   }
-  if (!points.length) return;
   points.forEach(({ vendor, point }, index) => {
     const marker = new window.mappls.Marker({
       map: directoryState.map,
       position: point,
-      fitbounds: false,
-      popupHtml: `<div class="vendor-map-popup"><strong>${esc(vendor.vendor_name)}</strong><br/>${esc(vendor.location_text || '')}<br/><a href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a></div>`,
       icon: { html: `<button class="vendor-map-marker" type="button">${index + 1}</button>` },
+      popupHtml: `<div class="vendor-map-popup"><strong>${esc(vendor.vendor_name)}</strong><br/>${esc(vendor.location_text || 'Location not listed')}<br/>${esc(vendor.final_contact_email || vendor.portal_email || 'No email')}<br/><a href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a> | <a href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco</a></div>`,
+      fitbounds: false,
     });
+    marker.on?.('click', () => focusVendor(vendor.portal_vendor_id));
+    marker.addListener?.('click', () => focusVendor(vendor.portal_vendor_id));
     directoryState.markers.push(marker);
   });
-  if (points[0]?.point && directoryState.map?.setCenter) {
-    directoryState.map.setCenter(points[0].point);
-    directoryState.map.setZoom(5);
+  const first = points[0]?.point;
+  if (first) {
+    directoryState.map?.setCenter?.(first);
+    directoryState.map?.setZoom?.(5.5);
   }
 }
 
-function renderResults() {
-  const vendors = directoryState.filteredVendors;
+function renderPagination(totalPages, totalMatches) {
+  paginationEls.forEach((container) => {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!directoryState.hasSearched || !totalMatches) return;
+    container.insertAdjacentHTML('beforeend', `<div class="vendor-page-summary">Showing ${getPageResults().length} of ${totalMatches} results</div>`);
+    const prevDisabled = directoryState.currentPage === 1 ? 'disabled' : '';
+    container.insertAdjacentHTML('beforeend', `<button class="btn btn-small btn-pagination" data-page-nav="prev" ${prevDisabled}>Prev</button>`);
+    const start = Math.max(1, directoryState.currentPage - 2);
+    const end = Math.min(totalPages, start + 4);
+    for (let page = start; page <= end; page += 1) {
+      container.insertAdjacentHTML('beforeend', `<button class="btn btn-small btn-pagination ${page === directoryState.currentPage ? 'active' : ''}" data-page-number="${page}">${page}</button>`);
+    }
+    const nextDisabled = directoryState.currentPage === totalPages ? 'disabled' : '';
+    container.insertAdjacentHTML('beforeend', `<button class="btn btn-small btn-pagination" data-page-nav="next" ${nextDisabled}>Next</button>`);
+  });
+}
+
+async function renderResults() {
+  const totalMatches = directoryState.filteredVendors.length;
+  const totalPages = getPageCount();
+  const pageVendors = getPageResults();
   setCounts();
-  resultsSummaryEl.textContent = `${vendors.length} supplier result${vendors.length === 1 ? '' : 's'} found`;
   resultsEl.innerHTML = '';
   mapListEl.innerHTML = '';
-  if (!vendors.length) {
-    resultsEl.innerHTML = '<article class="admin-card"><p>No suppliers match the current filters.</p></article>';
-    mapListEl.innerHTML = '<p class="section-note">No map results yet.</p>';
-    renderMapMarkers([]);
+  renderPagination(totalPages, totalMatches);
+
+  if (!directoryState.hasSearched) {
+    resultsSummaryEl.textContent = 'Enter a supplier, product, tag, location, or keyword to search the directory.';
+    resultsEl.innerHTML = '<div class="vendor-empty-state">The directory is loaded and ready. Start with a keyword or one of the filters on the left, then run the search to see suppliers.</div>';
+    mapListEl.innerHTML = '<div class="vendor-map-status">Run a search to display matching supplier locations on the map.</div>';
+    await renderMapMarkers([]);
     return;
   }
-  vendors.forEach((vendor, index) => {
-    const productPreview = (vendor.products || []).slice(0, 5).map((product) => product.product_name).filter(Boolean);
+
+  if (!totalMatches) {
+    resultsSummaryEl.textContent = 'No suppliers matched the current filters.';
+    resultsEl.innerHTML = '<div class="vendor-empty-state">No suppliers match this combination yet. Try a shorter keyword, a broader location, or remove one filter at a time.</div>';
+    mapListEl.innerHTML = '<div class="vendor-map-status">No map results for the current search.</div>';
+    await renderMapMarkers([]);
+    return;
+  }
+
+  resultsSummaryEl.textContent = `${totalMatches} supplier result${totalMatches === 1 ? '' : 's'} found. Page ${directoryState.currentPage} of ${totalPages}.`;
+
+  pageVendors.forEach((vendor, index) => {
+    const productPreview = (vendor.products || []).slice(0, 4).map((product) => product.product_name).filter(Boolean);
     const productExtra = Math.max((vendor.products || []).length - productPreview.length, 0);
-    resultsEl.insertAdjacentHTML('beforeend', `<article class="vendor-result-card" data-vendor-card="${esc(vendor.portal_vendor_id)}"><div class="vendor-result-top"><div><h4>${esc(vendor.vendor_name)}</h4><p>${esc(vendor.location_text || 'Location not listed')}</p></div><span class="admin-badge approved">${esc(String(vendor.products_count || vendor.products?.length || 0))} products</span></div><p>${esc(vendor.about_vendor || 'No description available.')}</p><p><strong>Service locations:</strong> ${esc((vendor.service_locations || []).join(', ') || 'Not listed')}</p><p><strong>Contact:</strong> ${esc(vendor.final_contact_email || vendor.portal_email || 'No email')} | ${esc(vendor.final_contact_phone || vendor.portal_phone || 'No phone')}</p><p><strong>Products:</strong> ${esc(productPreview.join(', ') || 'No products listed')}${productExtra ? ` +${productExtra} more` : ''}</p><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></article>`);
-    mapListEl.insertAdjacentHTML('beforeend', `<div class="vendor-map-list-item" data-focus-vendor="${esc(vendor.portal_vendor_id)}"><span class="vendor-flag">${index + 1}</span><span><strong>${esc(vendor.vendor_name)}</strong><br /><small>${esc(vendor.location_text || 'Location not listed')}</small></span><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></div>`);
+    const contactLine = [vendor.final_contact_email || vendor.portal_email || 'No email', vendor.final_contact_phone || vendor.portal_phone || 'No phone'].join(' | ');
+    const noteLine = vendor.contact_notes || vendor.website_status || 'Portal contacts only';
+    resultsEl.insertAdjacentHTML('beforeend', `<article class="vendor-result-card" data-vendor-card="${esc(vendor.portal_vendor_id)}"><div class="vendor-result-top"><div><h4>${esc(vendor.vendor_name)}</h4><p>${esc(vendor.location_text || 'Location not listed')}</p></div><span class="admin-badge approved">${esc(String(vendor.products_count || vendor.products?.length || 0))} products</span></div><p>${esc(vendor.about_vendor || 'No description available.')}</p><p><strong>Service locations:</strong> ${esc((vendor.service_locations || []).join(', ') || 'Not listed')}</p><p><strong>Contact:</strong> ${esc(contactLine)}</p><p><strong>Address:</strong> ${esc(vendor.final_contact_address || 'Not listed')}</p><p><strong>Enrichment:</strong> ${esc(noteLine)}</p><p><strong>Products:</strong> ${esc(productPreview.join(', ') || 'No products listed')}${productExtra ? ` +${productExtra} more` : ''}</p><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></article>`);
+    mapListEl.insertAdjacentHTML('beforeend', `<div class="vendor-map-list-item" data-focus-vendor="${esc(vendor.portal_vendor_id)}"><span class="vendor-flag">${index + 1}</span><span><strong>${esc(vendor.vendor_name)}</strong><br /><small>${esc(vendor.location_text || 'Location not listed')}</small><br /><small>${esc(vendor.final_contact_address || vendor.final_contact_email || 'Contact details available on detail page')}</small></span><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></div>`);
   });
-  renderMapMarkers(vendors);
+
+  const selectedVendor = directoryState.selectedVendorId && pageVendors.some((vendor) => vendor.portal_vendor_id === directoryState.selectedVendorId)
+    ? directoryState.selectedVendorId
+    : pageVendors[0]?.portal_vendor_id || null;
+  setSelectedVendor(selectedVendor);
+  await renderMapMarkers(pageVendors);
 }
 
 function applyFilters() {
   const filters = getFilters();
-  directoryState.filteredVendors = directoryState.vendors.filter((vendor) => matchesVendor(vendor, filters));
+  if (!hasAnyFilter(filters)) {
+    directoryState.hasSearched = false;
+    directoryState.filteredVendors = [];
+    directoryState.currentPage = 1;
+    statusEl.textContent = `Loaded ${directoryState.vendors.length} vendors and ${directoryState.products.length} products from the synced Selco directory.`;
+    renderResults();
+    return;
+  }
+  const scored = directoryState.vendors
+    .map((vendor) => ({ vendor, score: scoreVendor(vendor, filters) }))
+    .filter((entry) => entry.score !== null)
+    .sort((left, right) => right.score - left.score || left.vendor.vendor_name.localeCompare(right.vendor.vendor_name))
+    .map((entry) => entry.vendor);
+  directoryState.hasSearched = true;
+  directoryState.filteredVendors = scored;
+  directoryState.currentPage = 1;
   renderResults();
 }
 
 function clearFilters() {
   Object.values(searchEls).forEach((input) => { input.value = ''; });
+  directoryState.selectedVendorId = null;
   applyFilters();
 }
 
@@ -173,9 +385,9 @@ async function initializeDirectory() {
     const { vendors, products } = await SelcoVendorStore.loadDirectory();
     directoryState.vendors = vendors;
     directoryState.products = products;
-    directoryState.filteredVendors = vendors;
+    directoryState.filteredVendors = [];
     statusEl.textContent = `Loaded ${vendors.length} vendors and ${products.length} products from the synced Selco directory.`;
-    renderResults();
+    await renderResults();
   } catch (error) {
     statusEl.textContent = error.message || 'Vendor directory could not be loaded.';
     resultsEl.innerHTML = `<article class="admin-card"><p>${esc(statusEl.textContent)}</p></article>`;
@@ -185,6 +397,29 @@ async function initializeDirectory() {
 document.getElementById('run-search').addEventListener('click', applyFilters);
 document.getElementById('clear-search').addEventListener('click', clearFilters);
 Object.values(searchEls).forEach((input) => input.addEventListener('keypress', (event) => { if (event.key === 'Enter') applyFilters(); }));
-mapListEl.addEventListener('click', (event) => { if (event.target.closest('a')) return; const target = event.target.closest('[data-focus-vendor]'); if (target) focusVendor(target.dataset.focusVendor); });
+mapListEl.addEventListener('click', (event) => {
+  if (event.target.closest('a')) return;
+  const target = event.target.closest('[data-focus-vendor]');
+  if (target) focusVendor(target.dataset.focusVendor);
+});
+resultsEl.addEventListener('click', (event) => {
+  if (event.target.closest('a')) return;
+  const target = event.target.closest('[data-vendor-card]');
+  if (target) setSelectedVendor(target.dataset.vendorCard);
+});
+paginationEls.forEach((container) => container?.addEventListener('click', (event) => {
+  const pageButton = event.target.closest('[data-page-number]');
+  if (pageButton) {
+    directoryState.currentPage = Number(pageButton.dataset.pageNumber);
+    renderResults();
+    return;
+  }
+  const navButton = event.target.closest('[data-page-nav]');
+  if (!navButton) return;
+  const direction = navButton.dataset.pageNav;
+  if (direction === 'prev' && directoryState.currentPage > 1) directoryState.currentPage -= 1;
+  if (direction === 'next' && directoryState.currentPage < getPageCount()) directoryState.currentPage += 1;
+  renderResults();
+}));
 
 initializeDirectory();
