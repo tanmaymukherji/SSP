@@ -46,7 +46,7 @@ a{text-decoration:none}
 .vendor-map-marker{width:20px;height:20px;border-radius:999px;background:#1976d2;border:3px solid #fff;box-shadow:0 0 0 7px rgba(25,118,210,.18),0 8px 18px rgba(25,118,210,.28);cursor:pointer}
 .vendor-map-marker.cluster{width:34px;height:34px;border-width:4px;box-shadow:0 0 0 10px rgba(25,118,210,.18),0 10px 22px rgba(25,118,210,.28)}
 .vendor-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:.9rem}
-.vendor-map-popup{font-family:'Segoe UI',Tahoma,Verdana,sans-serif;line-height:1.45}
+.vendor-map-popup{font-family:'Segoe UI',Tahoma,Verdana,sans-serif;line-height:1.45;display:grid;gap:.55rem;max-width:min(340px,calc(100vw - 88px));max-height:min(360px,50vh);overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
 .vendor-map-popup a{color:#1f4b6e;font-weight:600}
 .vendor-product-media{display:grid;gap:.85rem}
 .vendor-product-image{width:100%;aspect-ratio:4/3;object-fit:contain;background:linear-gradient(135deg,#f3f8fb,#e8f0f4);border-radius:12px;border:1px solid #dbe5eb;padding:.75rem}
