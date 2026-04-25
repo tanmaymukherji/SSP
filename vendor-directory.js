@@ -8,11 +8,14 @@ const directoryState = {
   geocodeCache: new Map(),
   map: null,
   mapReady: false,
+  mapLoadPromise: null,
   markers: [],
   selectedVendorId: null,
 };
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
+const SEARCH_STATE_KEY = 'ssp_search_state_v1';
+const BLUE_MARKER_ICON = './blue-dot-marker.svg';
 
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
@@ -33,6 +36,46 @@ const paginationEls = [
 
 function esc(value) {
   return String(value || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+}
+
+function persistSearchState() {
+  const snapshot = {
+    search: {
+      supplier: searchEls.supplier.value,
+      product: searchEls.product.value,
+      tags: searchEls.tags.value,
+      location: searchEls.location.value,
+      keyword: searchEls.keyword.value,
+    },
+    currentPage: directoryState.currentPage,
+    hasSearched: directoryState.hasSearched,
+    selectedVendorId: directoryState.selectedVendorId,
+  };
+  try {
+    window.sessionStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(snapshot));
+  } catch {}
+}
+
+function restoreSearchState() {
+  try {
+    const raw = window.sessionStorage.getItem(SEARCH_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function applySearchSnapshot(snapshot) {
+  if (!snapshot?.search) return;
+  searchEls.supplier.value = String(snapshot.search.supplier || '');
+  searchEls.product.value = String(snapshot.search.product || '');
+  searchEls.tags.value = String(snapshot.search.tags || '');
+  searchEls.location.value = String(snapshot.search.location || '');
+  searchEls.keyword.value = String(snapshot.search.keyword || '');
+  directoryState.currentPage = Number(snapshot.currentPage || 1);
+  directoryState.selectedVendorId = snapshot.selectedVendorId || null;
 }
 
 function normalizeText(value) {
@@ -166,6 +209,7 @@ function setSelectedVendor(vendorId) {
 function focusVendor(vendorId) {
   if (!vendorId) return;
   setSelectedVendor(vendorId);
+  persistSearchState();
   const escapedId = window.CSS?.escape ? window.CSS.escape(vendorId) : vendorId.replace(/"/g, '\\"');
   const card = document.querySelector(`[data-vendor-card="${escapedId}"]`);
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -215,17 +259,29 @@ async function loadMapSdk() {
 
 async function ensureMap() {
   if (directoryState.mapReady) return true;
+  if (directoryState.mapLoadPromise) return await directoryState.mapLoadPromise;
   const loaded = await loadMapSdk();
   if (!loaded || !window.mappls?.Map) return false;
-  directoryState.map = new window.mappls.Map('results-map', {
-    center: INDIA_CENTER,
-    zoom: 4.8,
-    zoomControl: true,
-    geolocation: false,
-    location: false,
+  directoryState.mapLoadPromise = new Promise((resolve) => {
+    directoryState.map = new window.mappls.Map('results-map', {
+      center: INDIA_CENTER,
+      zoom: 4.8,
+      zoomControl: true,
+      geolocation: false,
+      location: false,
+    });
+    let settled = false;
+    const markReady = () => {
+      if (settled) return;
+      settled = true;
+      directoryState.mapReady = true;
+      resolve(true);
+    };
+    directoryState.map?.on?.('load', markReady);
+    directoryState.map?.addListener?.('load', markReady);
+    window.setTimeout(markReady, 1500);
   });
-  directoryState.mapReady = true;
-  return true;
+  return await directoryState.mapLoadPromise;
 }
 
 async function geocodeVendor(vendor) {
@@ -258,15 +314,6 @@ function clearMapMarkers() {
   directoryState.markers = [];
 }
 
-function createMarkerIconDataUrl(count) {
-  const size = count > 1 ? 34 : 20;
-  const ring = count > 1 ? 4 : 3;
-  const fontSize = count > 9 ? 12 : 13;
-  const label = count > 1 ? String(count) : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${(size / 2) - 1}" fill="rgba(25,118,210,0.22)" /><circle cx="${size / 2}" cy="${size / 2}" r="${(size / 2) - ring}" fill="#1976d2" stroke="#ffffff" stroke-width="${ring}" />${label ? `<text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${label}</text>` : ''}</svg>`;
-  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-}
-
 function groupMapPoints(entries) {
   const groups = new Map();
   entries.forEach((entry) => {
@@ -279,6 +326,20 @@ function groupMapPoints(entries) {
 
 function buildPopupHtml(entries) {
   return `<div class="vendor-map-popup">${entries.map(({ vendor }) => `<div><strong>${esc(vendor.vendor_name)}</strong><br/>${esc(vendor.location_text || 'Location not listed')}<br/><a href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a> | <a href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco</a></div>`).join('<hr style="border:none;border-top:1px solid #dbe5eb;margin:.55rem 0;" />')}</div>`;
+}
+
+function createRingPoints(point, count) {
+  if (count <= 1) return [point];
+  const radius = Math.min(0.08, 0.012 + (count * 0.0025));
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / count;
+    const latOffset = Math.sin(angle) * radius;
+    const lngOffset = Math.cos(angle) * radius / Math.max(Math.cos((point.lat * Math.PI) / 180), 0.35);
+    return {
+      lat: point.lat + latOffset,
+      lng: point.lng + lngOffset,
+    };
+  });
 }
 
 async function renderMapMarkers(vendors) {
@@ -299,19 +360,22 @@ async function renderMapMarkers(vendors) {
   }
   const groupedPoints = groupMapPoints(points);
   groupedPoints.forEach((entries) => {
-    const [{ vendor, point }] = entries;
-    const marker = new window.mappls.Marker({
-      map: directoryState.map,
-      position: point,
-      icon: createMarkerIconDataUrl(entries.length),
-      width: entries.length > 1 ? 34 : 20,
-      height: entries.length > 1 ? 34 : 20,
-      popupHtml: buildPopupHtml(entries),
-      fitbounds: false,
+    const [{ point }] = entries;
+    const ringPoints = createRingPoints(point, entries.length);
+    entries.forEach((entry, index) => {
+      const marker = new window.mappls.Marker({
+        map: directoryState.map,
+        position: ringPoints[index],
+        icon: BLUE_MARKER_ICON,
+        width: 28,
+        height: 28,
+        popupHtml: buildPopupHtml([entry]),
+        fitbounds: false,
+      });
+      marker.on?.('click', () => focusVendor(entry.vendor.portal_vendor_id));
+      marker.addListener?.('click', () => focusVendor(entry.vendor.portal_vendor_id));
+      directoryState.markers.push(marker);
     });
-    marker.on?.('click', () => focusVendor(vendor.portal_vendor_id));
-    marker.addListener?.('click', () => focusVendor(vendor.portal_vendor_id));
-    directoryState.markers.push(marker);
   });
   const first = points[0]?.point;
   if (first) {
@@ -378,6 +442,7 @@ async function renderResults() {
     ? directoryState.selectedVendorId
     : pageVendors[0]?.portal_vendor_id || null;
   setSelectedVendor(selectedVendor);
+  persistSearchState();
   await renderMapMarkers(pageVendors);
 }
 
@@ -399,12 +464,14 @@ function applyFilters() {
   directoryState.hasSearched = true;
   directoryState.filteredVendors = scored;
   directoryState.currentPage = 1;
+  persistSearchState();
   renderResults();
 }
 
 function clearFilters() {
   Object.values(searchEls).forEach((input) => { input.value = ''; });
   directoryState.selectedVendorId = null;
+  try { window.sessionStorage.removeItem(SEARCH_STATE_KEY); } catch {}
   applyFilters();
 }
 
@@ -416,6 +483,19 @@ async function initializeDirectory() {
     directoryState.products = products;
     directoryState.filteredVendors = [];
     statusEl.textContent = `Loaded ${vendors.length} vendors and ${products.length} products from the synced Selco directory.`;
+    const snapshot = restoreSearchState();
+    if (snapshot?.hasSearched) {
+      applySearchSnapshot(snapshot);
+      const filters = getFilters();
+      const scored = directoryState.vendors
+        .map((vendor) => ({ vendor, score: scoreVendor(vendor, filters) }))
+        .filter((entry) => entry.score !== null)
+        .sort((left, right) => right.score - left.score || left.vendor.vendor_name.localeCompare(right.vendor.vendor_name))
+        .map((entry) => entry.vendor);
+      directoryState.hasSearched = true;
+      directoryState.filteredVendors = scored;
+      directoryState.currentPage = Math.min(Math.max(1, directoryState.currentPage), Math.max(1, Math.ceil(scored.length / directoryState.pageSize)));
+    }
     await renderResults();
   } catch (error) {
     statusEl.textContent = error.message || 'Vendor directory could not be loaded.';
@@ -425,7 +505,10 @@ async function initializeDirectory() {
 
 document.getElementById('run-search').addEventListener('click', applyFilters);
 document.getElementById('clear-search').addEventListener('click', clearFilters);
-Object.values(searchEls).forEach((input) => input.addEventListener('keypress', (event) => { if (event.key === 'Enter') applyFilters(); }));
+Object.values(searchEls).forEach((input) => {
+  input.addEventListener('keypress', (event) => { if (event.key === 'Enter') applyFilters(); });
+  input.addEventListener('input', persistSearchState);
+});
 mapListEl.addEventListener('click', (event) => {
   if (event.target.closest('a')) return;
   const target = event.target.closest('[data-focus-vendor]');
@@ -434,12 +517,16 @@ mapListEl.addEventListener('click', (event) => {
 resultsEl.addEventListener('click', (event) => {
   if (event.target.closest('a')) return;
   const target = event.target.closest('[data-vendor-card]');
-  if (target) setSelectedVendor(target.dataset.vendorCard);
+  if (target) {
+    setSelectedVendor(target.dataset.vendorCard);
+    persistSearchState();
+  }
 });
 paginationEls.forEach((container) => container?.addEventListener('click', (event) => {
   const pageButton = event.target.closest('[data-page-number]');
   if (pageButton) {
     directoryState.currentPage = Number(pageButton.dataset.pageNumber);
+    persistSearchState();
     renderResults();
     return;
   }
@@ -448,6 +535,7 @@ paginationEls.forEach((container) => container?.addEventListener('click', (event
   const direction = navButton.dataset.pageNav;
   if (direction === 'prev' && directoryState.currentPage > 1) directoryState.currentPage -= 1;
   if (direction === 'next' && directoryState.currentPage < getPageCount()) directoryState.currentPage += 1;
+  persistSearchState();
   renderResults();
 }));
 
