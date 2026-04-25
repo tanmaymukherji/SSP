@@ -15,8 +15,6 @@ const directoryState = {
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
 const SEARCH_STATE_KEY = 'ssp_search_state_v1';
-const BLUE_MARKER_ICON = new URL('./blue-dot-marker.svg', window.location.href).href;
-
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
   product: document.getElementById('search-product'),
@@ -346,6 +344,14 @@ function createRingPoints(point, count) {
   });
 }
 
+function buildMarkerHtml(count) {
+  const size = count > 1 ? 34 : 20;
+  const halo = count > 1 ? 10 : 7;
+  const border = count > 1 ? 4 : 3;
+  const label = count > 1 ? `<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font:700 13px/1 'Segoe UI',Arial,sans-serif;">${count}</span>` : '';
+  return `<div style="position:relative;width:${size}px;height:${size}px;border-radius:999px;background:#1976d2;border:${border}px solid #fff;box-shadow:0 0 0 ${halo}px rgba(25,118,210,.18),0 8px 18px rgba(25,118,210,.28);">${label}</div>`;
+}
+
 async function renderMapMarkers(vendors) {
   const ready = await ensureMap();
   if (!ready) return;
@@ -373,9 +379,9 @@ async function renderMapMarkers(vendors) {
       const marker = new window.mappls.Marker({
         map: directoryState.map,
         position: ringPoints[index],
-        icon: BLUE_MARKER_ICON,
-        width: 28,
-        height: 28,
+        html: buildMarkerHtml(entries.length),
+        width: entries.length > 1 ? 34 : 20,
+        height: entries.length > 1 ? 34 : 20,
         popupHtml: buildPopupHtml([entry]),
         fitbounds: false,
       });
