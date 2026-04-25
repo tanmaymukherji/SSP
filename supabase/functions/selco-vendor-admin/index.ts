@@ -84,6 +84,27 @@ function toNullableNumber(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 
+function resolveSelcoImageUrl(value: unknown) {
+  const raw = requireString(value);
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw.split("?")[0];
+  if (raw.startsWith("/")) return `https://qa-business-cashflow-documents.s3.ap-south-1.amazonaws.com${raw}`.split("?")[0];
+  return `https://qa-business-cashflow-documents.s3.ap-south-1.amazonaws.com/${raw}`.split("?")[0];
+}
+
+function buildProductSpecifications(product: Record<string, unknown>) {
+  const specifications = Array.isArray(product.specifications) ? product.specifications : [];
+  return specifications
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      return {
+        key: normalizeLocalizedText(record.key) || "Specification",
+        value: normalizeLocalizedText(record.value) || "Not listed",
+      };
+    })
+    .filter((item) => item.key || item.value);
+}
+
 function cleanImportedAddress(value: string) {
   const address = requireString(value).replace(/\s+/g, " ").trim();
   if (!address) return "";
@@ -368,16 +389,26 @@ async function handleSyncSelcoVendors(token: string) {
       const portalVendorId = typeof vendorValue === "object" && vendorValue ? requireString((vendorValue as Record<string, unknown>)._id) : requireString(vendorValue);
       const productName = normalizeLocalizedText(product.name);
       const productDescription = normalizeLocalizedText(product.product_description);
-      const tags = dedupe([...(Array.isArray(product.features) ? product.features.map((item) => normalizeLocalizedText(item)) : []), ...(Array.isArray(product.specifications) ? product.specifications.map((item) => normalizeLocalizedText((item as Record<string, unknown>).key)) : [])]);
+      const productSpecifications = buildProductSpecifications(product);
+      const imageList = Array.isArray(product.images) ? product.images : [];
+      const defaultImage = imageList.find((item) => Boolean((item as Record<string, unknown>).isDefault)) as Record<string, unknown> | undefined;
+      const fallbackImage = imageList[0] as Record<string, unknown> | undefined;
+      const productImageUrl = resolveSelcoImageUrl(defaultImage?.url ?? fallbackImage?.url);
+      const tags = dedupe([
+        ...(Array.isArray(product.features) ? product.features.map((item) => normalizeLocalizedText(item)) : []),
+        ...productSpecifications.flatMap((item) => [item.key, item.value]),
+      ]);
       return {
         portal_product_id: requireString(product._id),
         portal_vendor_id: portalVendorId,
         vendor_name: normalizeLocalizedText((vendorValue as Record<string, unknown>)?.name) || "Unknown Vendor",
         product_name: productName,
         product_description: productDescription || null,
+        product_image_url: productImageUrl,
+        product_specifications: productSpecifications,
         product_link: product._id ? `https://solutionsportal.org/en/products/${requireString(product._id)}` : null,
         tags,
-        search_text: dedupe([productName, productDescription, ...tags]).join(" "),
+        search_text: dedupe([productName, productDescription, ...tags, ...productSpecifications.flatMap((item) => [item.key, item.value])]).join(" "),
         raw_product: product,
         synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

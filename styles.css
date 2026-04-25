@@ -42,10 +42,16 @@ a{text-decoration:none}
 .vendor-map-list-item{display:flex;gap:.8rem;align-items:flex-start;border:1px solid #dfe4ea;background:#f8f9fa;border-radius:12px;padding:.8rem;cursor:pointer;text-align:left}
 .vendor-map-list-item:hover{border-color:#2f7d73;background:#eef7f5}
 .vendor-map-list-item.active,.vendor-result-card.active{border-color:#1f4b6e;background:#eef6fb;box-shadow:0 10px 24px rgba(31,75,110,.12)}
-.vendor-flag,.vendor-map-marker{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#1f4b6e;color:#fff;font-weight:700;border:none;flex:0 0 30px}
+.vendor-flag{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#1f4b6e;color:#fff;font-weight:700;border:none;flex:0 0 30px}
+.vendor-map-marker{width:20px;height:20px;border-radius:999px;background:#1976d2;border:3px solid #fff;box-shadow:0 0 0 7px rgba(25,118,210,.18),0 8px 18px rgba(25,118,210,.28);cursor:pointer}
+.vendor-map-marker.cluster{width:34px;height:34px;border-width:4px;box-shadow:0 0 0 10px rgba(25,118,210,.18),0 10px 22px rgba(25,118,210,.28)}
 .vendor-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:.9rem}
 .vendor-map-popup{font-family:'Segoe UI',Tahoma,Verdana,sans-serif;line-height:1.45}
 .vendor-map-popup a{color:#1f4b6e;font-weight:600}
+.vendor-product-media{display:grid;gap:.85rem}
+.vendor-product-image{width:100%;aspect-ratio:4/3;object-fit:contain;background:linear-gradient(135deg,#f3f8fb,#e8f0f4);border-radius:12px;border:1px solid #dbe5eb;padding:.75rem}
+.vendor-spec-list{display:grid;gap:.4rem;margin-top:.5rem}
+.vendor-spec-item{padding:.5rem .65rem;border-radius:10px;background:#eef6fb;border:1px solid #d9e8f2;color:#385064}
 .vendor-empty-state{grid-column:1/-1;padding:1.3rem;border:1px dashed #bfd0db;border-radius:16px;background:#f7fbfd;color:#425466;line-height:1.7}
 .vendor-pagination{display:flex;gap:.45rem;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-bottom:.9rem}
 .vendor-page-summary{margin-right:auto;color:#5f6c7b;font-size:.92rem}

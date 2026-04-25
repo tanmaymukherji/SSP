@@ -12,6 +12,8 @@ const directoryState = {
   selectedVendorId: null,
 };
 
+const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
+
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
   product: document.getElementById('search-product'),
@@ -44,7 +46,7 @@ function tokenize(value) {
 function buildVendorIndex(vendor) {
   const productNames = (vendor.products || []).map((product) => normalizeText(product.product_name)).join(' ');
   const productDescriptions = (vendor.products || []).map((product) => normalizeText(product.product_description)).join(' ');
-  const tags = [...(vendor.tags || []), ...(vendor.products || []).flatMap((product) => product.tags || [])].map(normalizeText).join(' ');
+  const tags = [...(vendor.tags || []), ...(vendor.products || []).flatMap((product) => product.tags || []), ...(vendor.products || []).flatMap((product) => (product.product_specifications || []).flatMap((spec) => [spec?.key, spec?.value]))].map(normalizeText).join(' ');
   const locations = [vendor.location_text, vendor.city, vendor.state, vendor.country, vendor.final_contact_address, ...(vendor.service_locations || [])].map(normalizeText).join(' ');
   const contacts = [vendor.portal_contact_name, vendor.portal_email, vendor.portal_phone, vendor.website_email, vendor.website_phone, vendor.final_contact_email, vendor.final_contact_phone].map(normalizeText).join(' ');
   const website = [vendor.website_details, vendor.website_status, vendor.contact_notes, vendor.legacy_products_links].map(normalizeText).join(' ');
@@ -216,7 +218,7 @@ async function ensureMap() {
   const loaded = await loadMapSdk();
   if (!loaded || !window.mappls?.Map) return false;
   directoryState.map = new window.mappls.Map('results-map', {
-    center: { lat: 22.9734, lng: 78.6569 },
+    center: INDIA_CENTER,
     zoom: 4.8,
     zoomControl: true,
     geolocation: false,
@@ -256,6 +258,29 @@ function clearMapMarkers() {
   directoryState.markers = [];
 }
 
+function createMarkerIconDataUrl(count) {
+  const size = count > 1 ? 34 : 20;
+  const ring = count > 1 ? 4 : 3;
+  const fontSize = count > 9 ? 12 : 13;
+  const label = count > 1 ? String(count) : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${(size / 2) - 1}" fill="rgba(25,118,210,0.22)" /><circle cx="${size / 2}" cy="${size / 2}" r="${(size / 2) - ring}" fill="#1976d2" stroke="#ffffff" stroke-width="${ring}" />${label ? `<text x="50%" y="54%" text-anchor="middle" dominant-baseline="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${label}</text>` : ''}</svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function groupMapPoints(entries) {
+  const groups = new Map();
+  entries.forEach((entry) => {
+    const key = `${entry.point.lat.toFixed(3)}|${entry.point.lng.toFixed(3)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  });
+  return Array.from(groups.values());
+}
+
+function buildPopupHtml(entries) {
+  return `<div class="vendor-map-popup">${entries.map(({ vendor }) => `<div><strong>${esc(vendor.vendor_name)}</strong><br/>${esc(vendor.location_text || 'Location not listed')}<br/><a href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a> | <a href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco</a></div>`).join('<hr style="border:none;border-top:1px solid #dbe5eb;margin:.55rem 0;" />')}</div>`;
+}
+
 async function renderMapMarkers(vendors) {
   const ready = await ensureMap();
   if (!ready) return;
@@ -268,16 +293,20 @@ async function renderMapMarkers(vendors) {
     } else {
       mapListEl.insertAdjacentHTML('afterbegin', '<div class="vendor-map-status">Matching suppliers are listed here, but no coordinates were available for this page yet.</div>');
     }
-    directoryState.map?.setCenter?.({ lat: 22.9734, lng: 78.6569 });
+    directoryState.map?.setCenter?.(INDIA_CENTER);
     directoryState.map?.setZoom?.(4.8);
     return;
   }
-  points.forEach(({ vendor, point }, index) => {
+  const groupedPoints = groupMapPoints(points);
+  groupedPoints.forEach((entries) => {
+    const [{ vendor, point }] = entries;
     const marker = new window.mappls.Marker({
       map: directoryState.map,
       position: point,
-      icon: { html: `<button class="vendor-map-marker" type="button">${index + 1}</button>` },
-      popupHtml: `<div class="vendor-map-popup"><strong>${esc(vendor.vendor_name)}</strong><br/>${esc(vendor.location_text || 'Location not listed')}<br/>${esc(vendor.final_contact_email || vendor.portal_email || 'No email')}<br/><a href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a> | <a href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco</a></div>`,
+      icon: createMarkerIconDataUrl(entries.length),
+      width: entries.length > 1 ? 34 : 20,
+      height: entries.length > 1 ? 34 : 20,
+      popupHtml: buildPopupHtml(entries),
       fitbounds: false,
     });
     marker.on?.('click', () => focusVendor(vendor.portal_vendor_id));
@@ -319,7 +348,7 @@ async function renderResults() {
   renderPagination(totalPages, totalMatches);
 
   if (!directoryState.hasSearched) {
-    resultsSummaryEl.textContent = 'Enter a supplier, product, tag, location, or keyword to search the directory.';
+    resultsSummaryEl.textContent = 'Enter a supplier, product, specification, location, or keyword to search the directory.';
     resultsEl.innerHTML = '<div class="vendor-empty-state">The directory is loaded and ready. Start with a keyword or one of the filters on the left, then run the search to see suppliers.</div>';
     mapListEl.innerHTML = '<div class="vendor-map-status">Run a search to display matching supplier locations on the map.</div>';
     await renderMapMarkers([]);
