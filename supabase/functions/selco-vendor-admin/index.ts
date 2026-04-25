@@ -84,6 +84,12 @@ function toNullableNumber(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 
+function toUsableCoordinate(value: unknown) {
+  const num = toNullableNumber(value);
+  if (num === null) return null;
+  return Math.abs(num) <= 0.0001 ? null : num;
+}
+
 function resolveSelcoImageUrl(value: unknown) {
   const raw = requireString(value);
   if (!raw) return null;
@@ -271,8 +277,8 @@ function mergeContactDetails(
     websiteStatus: requireString(seed?.website_status) || requireString(scraped?.websiteStatus) || (websiteDetails ? "Website listed" : "No website"),
     contactNotes: requireString(seed?.contact_notes) || (websiteEmail || websitePhone || websiteAddress ? "Website contact used" : "Used portal contact where available"),
     legacyProductsLinks: requireString(seed?.products_links) || null,
-    latitude: toNullableNumber(seed?.latitude),
-    longitude: toNullableNumber(seed?.longitude),
+    latitude: toUsableCoordinate(seed?.latitude),
+    longitude: toUsableCoordinate(seed?.longitude),
   };
 }
 
@@ -326,6 +332,14 @@ async function handleSyncSelcoVendors(token: string) {
   try {
     const [vendors, products] = await Promise.all([fetchAllSelcoVendors(), fetchAllSelcoProducts()]);
     const contactSeedMap = await getContactSeedMap();
+    const existingCoordsByVendorId = new Map<string, { latitude: number | null; longitude: number | null }>();
+    const { data: existingVendors } = await supabase.from("selco_vendors").select("portal_vendor_id, latitude, longitude").limit(1000);
+    for (const row of existingVendors || []) {
+      existingCoordsByVendorId.set(requireString((row as Record<string, unknown>).portal_vendor_id), {
+        latitude: toUsableCoordinate((row as Record<string, unknown>).latitude),
+        longitude: toUsableCoordinate((row as Record<string, unknown>).longitude),
+      });
+    }
     const productsByVendor = new Map<string, Record<string, unknown>[]>();
     for (const product of products as Record<string, unknown>[]) {
       const vendorValue = product.vendorId;
@@ -349,6 +363,9 @@ async function handleSyncSelcoVendors(token: string) {
       const portalPhone = requireString(vendor.phone);
       const scraped = null;
       const contact = mergeContactDetails(seed, scraped, websiteDetails, portalEmail, portalPhone);
+      const existingCoords = existingCoordsByVendorId.get(portalVendorId);
+      const latitude = contact.latitude ?? existingCoords?.latitude ?? null;
+      const longitude = contact.longitude ?? existingCoords?.longitude ?? null;
       vendorRows.push({
         portal_vendor_id: portalVendorId,
         vendor_name: normalizedVendorName,
@@ -374,8 +391,8 @@ async function handleSyncSelcoVendors(token: string) {
         website_status: contact.websiteStatus,
         legacy_products_links: contact.legacyProductsLinks,
         contact_notes: contact.contactNotes,
-        latitude: contact.latitude,
-        longitude: contact.longitude,
+        latitude,
+        longitude,
         products_count: relatedProducts.length,
         search_text: dedupe([normalizeLocalizedText(vendor.name), normalizeLocalizedText(vendor.description), locationText, ...serviceLocations, ...tags, ...relatedProducts.flatMap((product) => [normalizeLocalizedText(product.name), normalizeLocalizedText(product.product_description)])]).join(" "),
         raw_vendor: vendor,
