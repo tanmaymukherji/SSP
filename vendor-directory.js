@@ -15,7 +15,7 @@ const directoryState = {
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
 const SEARCH_STATE_KEY = 'ssp_search_state_v1';
-const BLUE_MARKER_ICON = './blue-dot-marker.svg';
+const BLUE_MARKER_ICON = new URL('./blue-dot-marker.svg', window.location.href).href;
 
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
@@ -289,12 +289,14 @@ async function ensureMap() {
 async function geocodeVendor(vendor) {
   const cacheKey = vendor.portal_vendor_id;
   if (directoryState.geocodeCache.has(cacheKey)) return directoryState.geocodeCache.get(cacheKey);
-  if (vendor.latitude && vendor.longitude) {
+  const lat = Number(vendor.latitude);
+  const lng = Number(vendor.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && (Math.abs(lat) > 0.0001 || Math.abs(lng) > 0.0001)) {
     const point = { lat: Number(vendor.latitude), lng: Number(vendor.longitude) };
     directoryState.geocodeCache.set(cacheKey, point);
     return point;
   }
-  const query = [vendor.final_contact_address, vendor.location_text, vendor.city, vendor.state, vendor.country].filter(Boolean).join(', ');
+  const query = [vendor.location_text, vendor.city, vendor.state, vendor.country, vendor.final_contact_address].filter(Boolean).join(', ');
   if (!query) return null;
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`, {
@@ -348,13 +350,16 @@ async function renderMapMarkers(vendors) {
   const ready = await ensureMap();
   if (!ready) return;
   clearMapMarkers();
-  const geocoded = await Promise.all(vendors.map(async (vendor) => ({ vendor, point: await geocodeVendor(vendor) })));
-  const points = geocoded.filter((item) => item.point);
+  const points = [];
+  for (const vendor of vendors) {
+    const point = await geocodeVendor(vendor);
+    if (point) points.push({ vendor, point });
+  }
   if (!points.length) {
     if (!vendors.length) {
-      mapListEl.innerHTML = '<div class="vendor-map-status">No mappable coordinates were available for the current page of results yet.</div>';
+      mapListEl.innerHTML = '<div class="vendor-map-status">No mappable coordinates were available for the current search yet.</div>';
     } else {
-      mapListEl.insertAdjacentHTML('afterbegin', '<div class="vendor-map-status">Matching suppliers are listed here, but no coordinates were available for this page yet.</div>');
+      mapListEl.insertAdjacentHTML('afterbegin', '<div class="vendor-map-status">Matching suppliers are listed here, but no usable coordinates could be derived from the current data yet.</div>');
     }
     directoryState.map?.setCenter?.(INDIA_CENTER);
     directoryState.map?.setZoom?.(4.8);
@@ -379,7 +384,8 @@ async function renderMapMarkers(vendors) {
       directoryState.markers.push(marker);
     });
   });
-  const first = points[0]?.point;
+  const indiaPoints = points.filter(({ point }) => point.lat >= 6 && point.lat <= 38 && point.lng >= 68 && point.lng <= 98);
+  const first = indiaPoints[0]?.point || points[0]?.point;
   if (first) {
     directoryState.map?.setCenter?.(first);
     directoryState.map?.setZoom?.(5.5);
