@@ -7,8 +7,9 @@ a{text-decoration:none}
 .vendor-kicker{text-transform:uppercase;letter-spacing:.08em;font-size:.78rem;opacity:.82;margin-bottom:.4rem}
 .vendor-subtitle{max-width:720px;line-height:1.6;opacity:.92}
 .vendor-hero-actions{display:flex;gap:.6rem;flex-wrap:wrap}
-.admin-sync-fixed{position:fixed;right:18px;bottom:18px;z-index:30;background:linear-gradient(135deg,#6f8798,#5f7484);border:1px solid rgba(255,255,255,.35);box-shadow:0 12px 28px rgba(17,44,67,.18);opacity:.92}
-.admin-sync-fixed:hover{background:linear-gradient(135deg,#627a8b,#536876);opacity:1}
+.page-end-actions{display:flex;justify-content:flex-end;padding:1rem 0 .35rem}
+.admin-sync-end{display:inline-flex;align-items:center;justify-content:center;padding:.38rem .72rem;border-radius:999px;border:1px solid #d7e0e7;background:#f5f8fa;color:#6a7785;font-size:.8rem;font-weight:600;letter-spacing:.02em}
+.admin-sync-end:hover{color:#1f4b6e;border-color:#bfd0db;background:#eef4f7}
 .vendor-layout{display:grid;grid-template-columns:320px 1fr;gap:1rem;align-items:start}
 .vendor-sidebar,.vendor-results-shell,.vendor-detail-root{display:grid;gap:1rem}
 .section{background:#fff;border-radius:16px;padding:1.1rem;border:1px solid #dfe4ea;box-shadow:0 4px 15px rgba(0,0,0,.05)}
@@ -70,4 +71,4 @@ a{text-decoration:none}
 .session-panel,.queue-panel{display:none}
 .session-panel.active,.queue-panel.active{display:block}
 @media (max-width:980px){.vendor-layout,.vendor-map-grid,.vendor-detail-grid,.admin-card-list{grid-template-columns:1fr}}
-@media (max-width:700px){body{padding:16px}.vendor-hero h1,.admin-header h1{font-size:1.6rem}.vendor-hero{padding:1.2rem}.vendor-map-canvas{min-height:320px}.vendor-results-list,.vendor-products-grid,.admin-card-list{grid-template-columns:1fr}.admin-sync-fixed{right:14px;bottom:14px}}
+@media (max-width:700px){body{padding:16px}.vendor-hero h1,.admin-header h1{font-size:1.6rem}.vendor-hero{padding:1.2rem}.vendor-map-canvas{min-height:320px}.vendor-results-list,.vendor-products-grid,.admin-card-list{grid-template-columns:1fr}.page-end-actions{padding:.85rem 0 .2rem}}
