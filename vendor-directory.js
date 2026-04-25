@@ -32,6 +32,41 @@ const paginationEls = [
   document.getElementById('results-pagination-bottom'),
 ];
 
+function uniqueSortedValues(values) {
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+}
+
+function populateSelectOptions(selectEl, values, placeholder) {
+  if (!selectEl) return;
+  const previousValue = selectEl.value;
+  selectEl.innerHTML = '';
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = placeholder;
+  selectEl.appendChild(defaultOption);
+  values.forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    selectEl.appendChild(option);
+  });
+  selectEl.value = values.includes(previousValue) ? previousValue : '';
+}
+
+function populateFilterOptions() {
+  populateSelectOptions(
+    searchEls.supplier,
+    uniqueSortedValues(directoryState.vendors.map((vendor) => vendor.vendor_name)),
+    'All organisations'
+  );
+  populateSelectOptions(
+    searchEls.product,
+    uniqueSortedValues(directoryState.products.map((product) => product.product_name)),
+    'All machines'
+  );
+}
+
 function esc(value) {
   return String(value || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 }
@@ -500,6 +535,7 @@ async function initializeDirectory() {
     directoryState.vendors = vendors;
     directoryState.products = products;
     directoryState.filteredVendors = [];
+    populateFilterOptions();
     statusEl.textContent = `Loaded ${vendors.length} vendors and ${products.length} products from the synced Selco directory.`;
     const snapshot = restoreSearchState();
     if (snapshot?.hasSearched) {
@@ -526,6 +562,7 @@ document.getElementById('clear-search').addEventListener('click', clearFilters);
 Object.values(searchEls).forEach((input) => {
   input.addEventListener('keypress', (event) => { if (event.key === 'Enter') applyFilters(); });
   input.addEventListener('input', persistSearchState);
+  input.addEventListener('change', persistSearchState);
 });
 mapListEl.addEventListener('click', (event) => {
   if (event.target.closest('a')) return;
