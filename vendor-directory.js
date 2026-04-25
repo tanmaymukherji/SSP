@@ -206,10 +206,12 @@ function setSelectedVendor(vendorId) {
   });
 }
 
-function focusVendor(vendorId) {
+function focusVendor(vendorId, options = {}) {
   if (!vendorId) return;
+  const shouldScroll = Boolean(options.scroll);
   setSelectedVendor(vendorId);
   persistSearchState();
+  if (!shouldScroll) return;
   const escapedId = window.CSS?.escape ? window.CSS.escape(vendorId) : vendorId.replace(/"/g, '\\"');
   const card = document.querySelector(`[data-vendor-card="${escapedId}"]`);
   if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -406,6 +408,7 @@ async function renderResults() {
   const totalMatches = directoryState.filteredVendors.length;
   const totalPages = getPageCount();
   const pageVendors = getPageResults();
+  const mapVendors = directoryState.hasSearched ? directoryState.filteredVendors : [];
   setCounts();
   resultsEl.innerHTML = '';
   mapListEl.innerHTML = '';
@@ -429,21 +432,24 @@ async function renderResults() {
 
   resultsSummaryEl.textContent = `${totalMatches} supplier result${totalMatches === 1 ? '' : 's'} found. Page ${directoryState.currentPage} of ${totalPages}.`;
 
-  pageVendors.forEach((vendor, index) => {
+  mapVendors.forEach((vendor, index) => {
+    mapListEl.insertAdjacentHTML('beforeend', `<div class="vendor-map-list-item" data-focus-vendor="${esc(vendor.portal_vendor_id)}"><span class="vendor-flag">${index + 1}</span><span><strong>${esc(vendor.vendor_name)}</strong><br /><small>${esc(vendor.location_text || 'Location not listed')}</small><br /><small>${esc(vendor.final_contact_address || vendor.final_contact_email || 'Contact details available on detail page')}</small></span><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></div>`);
+  });
+
+  pageVendors.forEach((vendor) => {
     const productPreview = (vendor.products || []).slice(0, 4).map((product) => product.product_name).filter(Boolean);
     const productExtra = Math.max((vendor.products || []).length - productPreview.length, 0);
     const contactLine = [vendor.final_contact_email || vendor.portal_email || 'No email', vendor.final_contact_phone || vendor.portal_phone || 'No phone'].join(' | ');
     const noteLine = vendor.contact_notes || vendor.website_status || 'Portal contacts only';
     resultsEl.insertAdjacentHTML('beforeend', `<article class="vendor-result-card" data-vendor-card="${esc(vendor.portal_vendor_id)}"><div class="vendor-result-top"><div><h4>${esc(vendor.vendor_name)}</h4><p>${esc(vendor.location_text || 'Location not listed')}</p></div><span class="admin-badge approved">${esc(String(vendor.products_count || vendor.products?.length || 0))} products</span></div><p>${esc(vendor.about_vendor || 'No description available.')}</p><p><strong>Service locations:</strong> ${esc((vendor.service_locations || []).join(', ') || 'Not listed')}</p><p><strong>Contact:</strong> ${esc(contactLine)}</p><p><strong>Address:</strong> ${esc(vendor.final_contact_address || 'Not listed')}</p><p><strong>Enrichment:</strong> ${esc(noteLine)}</p><p><strong>Products:</strong> ${esc(productPreview.join(', ') || 'No products listed')}${productExtra ? ` +${productExtra} more` : ''}</p><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></article>`);
-    mapListEl.insertAdjacentHTML('beforeend', `<div class="vendor-map-list-item" data-focus-vendor="${esc(vendor.portal_vendor_id)}"><span class="vendor-flag">${index + 1}</span><span><strong>${esc(vendor.vendor_name)}</strong><br /><small>${esc(vendor.location_text || 'Location not listed')}</small><br /><small>${esc(vendor.final_contact_address || vendor.final_contact_email || 'Contact details available on detail page')}</small></span><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></div>`);
   });
 
-  const selectedVendor = directoryState.selectedVendorId && pageVendors.some((vendor) => vendor.portal_vendor_id === directoryState.selectedVendorId)
+  const selectedVendor = directoryState.selectedVendorId && mapVendors.some((vendor) => vendor.portal_vendor_id === directoryState.selectedVendorId)
     ? directoryState.selectedVendorId
-    : pageVendors[0]?.portal_vendor_id || null;
+    : mapVendors[0]?.portal_vendor_id || null;
   setSelectedVendor(selectedVendor);
   persistSearchState();
-  await renderMapMarkers(pageVendors);
+  await renderMapMarkers(mapVendors);
 }
 
 function applyFilters() {
