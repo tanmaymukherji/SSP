@@ -17,6 +17,17 @@
         <h1>Supplier and Product Search</h1>
         <p class="vendor-subtitle">Search synced suppliers, products, specifications, keywords, and service locations from the Selco Solutions Portal.</p>
       </div>
+      <div class="vendor-hero-actions vendor-hero-summary">
+        <section class="section vendor-hero-summary-card">
+          <h3>Directory Summary</h3>
+          <div class="stats-grid">
+            <div class="stat-card"><div class="stat-number" id="vendor-total-count">0</div><div>Vendors</div></div>
+            <div class="stat-card"><div class="stat-number" id="product-total-count">0</div><div>Products</div></div>
+            <div class="stat-card"><div class="stat-number" id="filtered-vendor-count">0</div><div>Matches</div></div>
+          </div>
+          <p class="section-note" id="directory-status">Loading vendor directory...</p>
+        </section>
+      </div>
     </header>
 
     <main class="vendor-layout">
@@ -33,16 +44,6 @@
             <button class="btn btn-danger btn-small" id="clear-search" type="button">Clear</button>
           </div>
         </section>
-
-        <section class="section">
-          <h3>Directory Summary</h3>
-          <div class="stats-grid">
-            <div class="stat-card"><div class="stat-number" id="vendor-total-count">0</div><div>Vendors</div></div>
-            <div class="stat-card"><div class="stat-number" id="product-total-count">0</div><div>Products</div></div>
-            <div class="stat-card"><div class="stat-number" id="filtered-vendor-count">0</div><div>Matches</div></div>
-          </div>
-          <p class="section-note" id="directory-status">Loading vendor directory...</p>
-        </section>
       </aside>
 
       <section class="vendor-results-shell">
@@ -55,7 +56,6 @@
           </div>
           <div class="vendor-map-grid">
             <div id="results-map" class="vendor-map-canvas"></div>
-            <div id="map-results-list" class="vendor-map-list"></div>
           </div>
         </div>
 

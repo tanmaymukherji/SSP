@@ -24,7 +24,6 @@ const searchEls = {
 };
 
 const resultsEl = document.getElementById('vendor-results');
-const mapListEl = document.getElementById('map-results-list');
 const statusEl = document.getElementById('directory-status');
 const resultsSummaryEl = document.getElementById('results-summary');
 const paginationEls = [
@@ -397,11 +396,6 @@ async function renderMapMarkers(vendors) {
     if (point) points.push({ vendor, point });
   }
   if (!points.length) {
-    if (!vendors.length) {
-      mapListEl.innerHTML = '<div class="vendor-map-status">No mappable coordinates were available for the current search yet.</div>';
-    } else {
-      mapListEl.insertAdjacentHTML('afterbegin', '<div class="vendor-map-status">Matching suppliers are listed here, but no usable coordinates could be derived from the current data yet.</div>');
-    }
     directoryState.map?.setCenter?.(INDIA_CENTER);
     directoryState.map?.setZoom?.(4.8);
     return;
@@ -455,16 +449,13 @@ async function renderResults() {
   const totalMatches = directoryState.filteredVendors.length;
   const totalPages = getPageCount();
   const pageVendors = getPageResults();
-  const mapVendors = directoryState.hasSearched ? directoryState.filteredVendors : [];
   setCounts();
   resultsEl.innerHTML = '';
-  mapListEl.innerHTML = '';
   renderPagination(totalPages, totalMatches);
 
   if (!directoryState.hasSearched) {
     resultsSummaryEl.textContent = 'Enter a supplier, product, specification, location, or keyword to search the directory.';
     resultsEl.innerHTML = '<div class="vendor-empty-state">The directory is loaded and ready. Start with a keyword or one of the filters on the left, then run the search to see suppliers.</div>';
-    mapListEl.innerHTML = '<div class="vendor-map-status">Run a search to display matching supplier locations on the map.</div>';
     await renderMapMarkers([]);
     return;
   }
@@ -472,16 +463,11 @@ async function renderResults() {
   if (!totalMatches) {
     resultsSummaryEl.textContent = 'No suppliers matched the current filters.';
     resultsEl.innerHTML = '<div class="vendor-empty-state">No suppliers match this combination yet. Try a shorter keyword, a broader location, or remove one filter at a time.</div>';
-    mapListEl.innerHTML = '<div class="vendor-map-status">No map results for the current search.</div>';
     await renderMapMarkers([]);
     return;
   }
 
   resultsSummaryEl.textContent = `${totalMatches} supplier result${totalMatches === 1 ? '' : 's'} found. Page ${directoryState.currentPage} of ${totalPages}.`;
-
-  mapVendors.forEach((vendor, index) => {
-    mapListEl.insertAdjacentHTML('beforeend', `<div class="vendor-map-list-item" data-focus-vendor="${esc(vendor.portal_vendor_id)}"><span class="vendor-flag">${index + 1}</span><span><strong>${esc(vendor.vendor_name)}</strong><br /><small>${esc(vendor.location_text || 'Location not listed')}</small><br /><small>${esc(vendor.final_contact_address || vendor.final_contact_email || 'Contact details available on detail page')}</small></span><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></div>`);
-  });
 
   pageVendors.forEach((vendor) => {
     const productPreview = (vendor.products || []).slice(0, 4).map((product) => product.product_name).filter(Boolean);
@@ -491,12 +477,12 @@ async function renderResults() {
     resultsEl.insertAdjacentHTML('beforeend', `<article class="vendor-result-card" data-vendor-card="${esc(vendor.portal_vendor_id)}"><div class="vendor-result-top"><div><h4>${esc(vendor.vendor_name)}</h4><p>${esc(vendor.location_text || 'Location not listed')}</p></div><span class="admin-badge approved">${esc(String(vendor.products_count || vendor.products?.length || 0))} products</span></div><p>${esc(vendor.about_vendor || 'No description available.')}</p><p><strong>Service locations:</strong> ${esc((vendor.service_locations || []).join(', ') || 'Not listed')}</p><p><strong>Contact:</strong> ${esc(contactLine)}</p><p><strong>Address:</strong> ${esc(vendor.final_contact_address || 'Not listed')}</p><p><strong>Enrichment:</strong> ${esc(noteLine)}</p><p><strong>Products:</strong> ${esc(productPreview.join(', ') || 'No products listed')}${productExtra ? ` +${productExtra} more` : ''}</p><div class="btn-group"><a class="btn btn-small" href="./vendor-detail.html?vendor=${encodeURIComponent(vendor.portal_vendor_id)}">View Details</a><a class="btn btn-warning btn-small" href="${esc(vendor.portal_vendor_link || '#')}" target="_blank" rel="noreferrer">View on Selco Solution Portal</a></div></article>`);
   });
 
-  const selectedVendor = directoryState.selectedVendorId && mapVendors.some((vendor) => vendor.portal_vendor_id === directoryState.selectedVendorId)
+  const selectedVendor = directoryState.selectedVendorId && directoryState.filteredVendors.some((vendor) => vendor.portal_vendor_id === directoryState.selectedVendorId)
     ? directoryState.selectedVendorId
-    : mapVendors[0]?.portal_vendor_id || null;
+    : directoryState.filteredVendors[0]?.portal_vendor_id || null;
   setSelectedVendor(selectedVendor);
   persistSearchState();
-  await renderMapMarkers(mapVendors);
+  await renderMapMarkers(directoryState.filteredVendors);
 }
 
 function applyFilters() {
@@ -563,11 +549,6 @@ Object.values(searchEls).forEach((input) => {
   input.addEventListener('keypress', (event) => { if (event.key === 'Enter') applyFilters(); });
   input.addEventListener('input', persistSearchState);
   input.addEventListener('change', persistSearchState);
-});
-mapListEl.addEventListener('click', (event) => {
-  if (event.target.closest('a')) return;
-  const target = event.target.closest('[data-focus-vendor]');
-  if (target) focusVendor(target.dataset.focusVendor);
 });
 resultsEl.addEventListener('click', (event) => {
   if (event.target.closest('a')) return;
