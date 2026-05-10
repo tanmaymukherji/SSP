@@ -434,12 +434,14 @@ function buildMapBounds(points) {
     minLng,
     maxLng,
     boundsArray: [
-      [minLat, minLng],
-      [maxLat, maxLng],
+      [minLng, minLat],
+      [maxLng, maxLat],
     ],
     boundsObject: {
-      southWest: { lat: minLat, lng: minLng },
-      northEast: { lat: maxLat, lng: maxLng },
+      north: maxLat,
+      south: minLat,
+      east: maxLng,
+      west: minLng,
     },
     center: {
       lat: (minLat + maxLat) / 2,
@@ -466,26 +468,33 @@ function fitMapToPoints(points) {
     directoryState.map?.setZoom?.(4.8);
     return;
   }
-  if (typeof directoryState.map?.fitBounds === 'function') {
-    try {
-      directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5, duration: 0 });
-      return;
-    } catch {}
-    try {
-      directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5 });
-      return;
-    } catch {}
-    try {
-      directoryState.map.fitBounds(bounds.boundsObject, { padding: 60, maxZoom: 8.5 });
-      return;
-    } catch {}
-    try {
-      directoryState.map.fitBounds(bounds.boundsArray);
-      return;
-    } catch {}
-  }
+  try {
+    if (typeof directoryState.map?.fitBounds === 'function') {
+      try {
+        directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5, duration: 0 });
+        return;
+      } catch {}
+      try {
+        directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5 });
+        return;
+      } catch {}
+      try {
+        directoryState.map.fitBounds(bounds.boundsObject, { padding: 60, maxZoom: 8.5 });
+        return;
+      } catch {}
+      try {
+        directoryState.map.fitBounds(bounds.boundsArray);
+        return;
+      } catch {}
+    }
+  } catch {}
+
+  const latSpan = Math.max(bounds.maxLat - bounds.minLat, 0.01);
+  const lngSpan = Math.max(bounds.maxLng - bounds.minLng, 0.01);
+  const maxSpan = Math.max(latSpan, lngSpan);
+  const fallbackZoom = maxSpan > 20 ? 4.4 : maxSpan > 10 ? 5.1 : maxSpan > 5 ? 5.8 : maxSpan > 2 ? 6.6 : 7.4;
   directoryState.map?.setCenter?.(bounds.center);
-  directoryState.map?.setZoom?.(5.5);
+  directoryState.map?.setZoom?.(fallbackZoom);
 }
 
 async function renderMapMarkers(vendors) {
