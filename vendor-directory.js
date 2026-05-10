@@ -14,6 +14,12 @@ const directoryState = {
 };
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
+const INDIA_BOUNDS = {
+  minLat: 6,
+  maxLat: 38,
+  minLng: 68,
+  maxLng: 98,
+};
 const SEARCH_STATE_KEY = 'ssp_search_state_v1';
 const searchEls = {
   supplier: document.getElementById('search-supplier'),
@@ -112,6 +118,18 @@ function applySearchSnapshot(snapshot) {
 
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function isWithinIndia(point) {
+  return Boolean(
+    point &&
+    Number.isFinite(point.lat) &&
+    Number.isFinite(point.lng) &&
+    point.lat >= INDIA_BOUNDS.minLat &&
+    point.lat <= INDIA_BOUNDS.maxLat &&
+    point.lng >= INDIA_BOUNDS.minLng &&
+    point.lng <= INDIA_BOUNDS.maxLng
+  );
 }
 
 function tokenize(value) {
@@ -325,19 +343,27 @@ async function geocodeVendor(vendor) {
   const lng = Number(vendor.longitude);
   if (Number.isFinite(lat) && Number.isFinite(lng) && (Math.abs(lat) > 0.0001 || Math.abs(lng) > 0.0001)) {
     const point = { lat: Number(vendor.latitude), lng: Number(vendor.longitude) };
+    if (!isWithinIndia(point)) {
+      directoryState.geocodeCache.set(cacheKey, null);
+      return null;
+    }
     directoryState.geocodeCache.set(cacheKey, point);
     return point;
   }
   const query = [vendor.location_text, vendor.city, vendor.state, vendor.country, vendor.final_contact_address].filter(Boolean).join(', ');
   if (!query) return null;
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`, {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=in&q=${encodeURIComponent(query)}`, {
       headers: { Accept: 'application/json' },
     });
     const data = await response.json();
     const match = Array.isArray(data) ? data[0] : null;
     if (!match) return null;
     const point = { lat: Number(match.lat), lng: Number(match.lon) };
+    if (!isWithinIndia(point)) {
+      directoryState.geocodeCache.set(cacheKey, null);
+      return null;
+    }
     directoryState.geocodeCache.set(cacheKey, point);
     return point;
   } catch {
@@ -495,10 +521,8 @@ async function renderMapMarkers(vendors) {
       directoryState.markers.push(marker);
     });
   });
-  const indiaPoints = points
-    .map(({ point }) => point)
-    .filter((point) => point.lat >= 6 && point.lat <= 38 && point.lng >= 68 && point.lng <= 98);
-  fitMapToPoints(indiaPoints.length ? indiaPoints : points.map(({ point }) => point));
+  const indiaPoints = points.map(({ point }) => point).filter(isWithinIndia);
+  fitMapToPoints(indiaPoints);
 }
 
 function renderPagination(totalPages, totalMatches) {
