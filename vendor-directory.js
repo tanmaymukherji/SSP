@@ -386,6 +386,82 @@ function buildMarkerHtml(count) {
   return `<div style="position:relative;width:${size}px;height:${size}px;border-radius:999px;background:#1976d2;border:${border}px solid #fff;box-shadow:0 0 0 ${halo}px rgba(25,118,210,.18),0 8px 18px rgba(25,118,210,.28);">${label}</div>`;
 }
 
+function buildMapBounds(points) {
+  if (!Array.isArray(points) || !points.length) return null;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  points.forEach((point) => {
+    if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+    minLat = Math.min(minLat, point.lat);
+    maxLat = Math.max(maxLat, point.lat);
+    minLng = Math.min(minLng, point.lng);
+    maxLng = Math.max(maxLng, point.lng);
+  });
+  if (!Number.isFinite(minLat) || !Number.isFinite(maxLat) || !Number.isFinite(minLng) || !Number.isFinite(maxLng)) {
+    return null;
+  }
+  return {
+    minLat,
+    maxLat,
+    minLng,
+    maxLng,
+    boundsArray: [
+      [minLat, minLng],
+      [maxLat, maxLng],
+    ],
+    boundsObject: {
+      southWest: { lat: minLat, lng: minLng },
+      northEast: { lat: maxLat, lng: maxLng },
+    },
+    center: {
+      lat: (minLat + maxLat) / 2,
+      lng: (minLng + maxLng) / 2,
+    },
+  };
+}
+
+function fitMapToPoints(points) {
+  if (!directoryState.map) return;
+  if (!points.length) {
+    directoryState.map?.setCenter?.(INDIA_CENTER);
+    directoryState.map?.setZoom?.(4.8);
+    return;
+  }
+  if (points.length === 1) {
+    directoryState.map?.setCenter?.(points[0]);
+    directoryState.map?.setZoom?.(8);
+    return;
+  }
+  const bounds = buildMapBounds(points);
+  if (!bounds) {
+    directoryState.map?.setCenter?.(INDIA_CENTER);
+    directoryState.map?.setZoom?.(4.8);
+    return;
+  }
+  if (typeof directoryState.map?.fitBounds === 'function') {
+    try {
+      directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5, duration: 0 });
+      return;
+    } catch {}
+    try {
+      directoryState.map.fitBounds(bounds.boundsArray, { padding: 60, maxZoom: 8.5 });
+      return;
+    } catch {}
+    try {
+      directoryState.map.fitBounds(bounds.boundsObject, { padding: 60, maxZoom: 8.5 });
+      return;
+    } catch {}
+    try {
+      directoryState.map.fitBounds(bounds.boundsArray);
+      return;
+    } catch {}
+  }
+  directoryState.map?.setCenter?.(bounds.center);
+  directoryState.map?.setZoom?.(5.5);
+}
+
 async function renderMapMarkers(vendors) {
   const ready = await ensureMap();
   if (!ready) return;
@@ -419,12 +495,10 @@ async function renderMapMarkers(vendors) {
       directoryState.markers.push(marker);
     });
   });
-  const indiaPoints = points.filter(({ point }) => point.lat >= 6 && point.lat <= 38 && point.lng >= 68 && point.lng <= 98);
-  const first = indiaPoints[0]?.point || points[0]?.point;
-  if (first) {
-    directoryState.map?.setCenter?.(first);
-    directoryState.map?.setZoom?.(5.5);
-  }
+  const indiaPoints = points
+    .map(({ point }) => point)
+    .filter((point) => point.lat >= 6 && point.lat <= 38 && point.lng >= 68 && point.lng <= 98);
+  fitMapToPoints(indiaPoints.length ? indiaPoints : points.map(({ point }) => point));
 }
 
 function renderPagination(totalPages, totalMatches) {
